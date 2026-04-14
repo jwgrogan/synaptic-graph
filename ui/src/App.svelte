@@ -1,12 +1,17 @@
 <script lang="ts">
-  // Placeholder — will be built out in later tasks
+  import Galaxy from "./lib/Galaxy.svelte";
+  import { currentView } from "./lib/stores";
 </script>
 
 <div class="app-layout">
   <div class="galaxy-container">
-    <p style="color: var(--text-muted); text-align: center; margin-top: 40vh;">
-      Memory Galaxy — loading...
-    </p>
+    {#if $currentView === "galaxy"}
+      <Galaxy />
+    {:else}
+      <p style="color: var(--text-muted); text-align: center; margin-top: 40vh;">
+        {$currentView} view — coming soon
+      </p>
+    {/if}
   </div>
 </div>
 
