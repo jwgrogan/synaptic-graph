@@ -14,15 +14,28 @@
     await engine.init(canvasEl);
 
     // Load data
-    const impulseData = await getAllImpulses();
-    const connectionData = await getAllConnections();
+    let impulseData: import("./types").Impulse[] = [];
+    let connectionData: import("./types").Connection[] = [];
+    try {
+      impulseData = await getAllImpulses();
+      connectionData = await getAllConnections();
+      console.log(`[synaptic-graph] Loaded ${impulseData.length} impulses, ${connectionData.length} connections`);
+    } catch (err) {
+      console.error("[synaptic-graph] Failed to load data:", err);
+    }
     impulses.set(impulseData);
     connections.set(connectionData);
+
+    if (impulseData.length === 0) {
+      console.log("[synaptic-graph] No impulses found — galaxy will be empty");
+      return;
+    }
 
     // Compute layout
     const layout = computeLayout(impulseData, connectionData);
     nodes.set(layout.nodes);
     edges.set(layout.edges);
+    console.log(`[synaptic-graph] Layout computed: ${layout.nodes.length} nodes at positions`, layout.nodes.map(n => ({ id: n.impulse.id.slice(0,8), x: Math.round(n.x), y: Math.round(n.y) })));
 
     // Build nebula cluster info
     const nodePositions = new Map<string, { x: number; y: number }>();
