@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { GalaxyEngine } from "./renderer/engine";
   import { computeLayout } from "./renderer/layout";
+  import { detectClusters, buildClusterInfo } from "./renderer/clusters";
   import { nodes, edges, impulses, connections, selectedNodeId } from "./stores";
   import { getAllImpulses, getAllConnections } from "./api";
 
@@ -23,8 +24,17 @@
     nodes.set(layout.nodes);
     edges.set(layout.edges);
 
+    // Build nebula cluster info
+    const nodePositions = new Map<string, { x: number; y: number }>();
+    for (const node of layout.nodes) {
+      nodePositions.set(node.impulse.id, { x: node.x, y: node.y });
+    }
+    const nodeToCluster = detectClusters(impulseData, connectionData);
+    const clusterInfo = buildClusterInfo(nodeToCluster, nodePositions);
+
     // Render
     engine.renderGraph(layout.nodes, layout.edges);
+    engine.renderNebulae(clusterInfo, nodePositions);
 
     // Handle node clicks
     engine.nodeLayer.on("pointerdown", (e) => {

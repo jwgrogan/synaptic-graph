@@ -2,12 +2,16 @@ import { Application, Container } from "pixi.js";
 import type { GraphNode, GraphEdge } from "../types";
 import { renderNodes, updateNodes } from "./nodes";
 import { renderConnections, updateConnections } from "./connections";
+import { renderNebulae } from "./nebula";
+import type { Cluster } from "./clusters";
 import { Camera } from "./camera";
 
 export class GalaxyEngine {
   app: Application;
   camera: Camera;
   worldContainer: Container;
+  nebulaLayer: Container;
+  ghostLayer: Container;
   connectionLayer: Container;
   nodeLayer: Container;
   private resizeObserver: ResizeObserver | null = null;
@@ -16,6 +20,8 @@ export class GalaxyEngine {
     this.app = new Application();
     this.camera = new Camera();
     this.worldContainer = new Container();
+    this.nebulaLayer = new Container();
+    this.ghostLayer = new Container();
     this.connectionLayer = new Container();
     this.nodeLayer = new Container();
   }
@@ -30,6 +36,8 @@ export class GalaxyEngine {
       autoDensity: true,
     });
 
+    this.worldContainer.addChild(this.nebulaLayer);
+    this.worldContainer.addChild(this.ghostLayer);
     this.worldContainer.addChild(this.connectionLayer);
     this.worldContainer.addChild(this.nodeLayer);
     this.app.stage.addChild(this.worldContainer);
@@ -104,6 +112,13 @@ export class GalaxyEngine {
     this.camera.x = screenW / 2 - cx * this.camera.zoom;
     this.camera.y = screenH / 2 - cy * this.camera.zoom;
     this.applyCameraTransform();
+  }
+
+  renderNebulae(
+    clusters: Cluster[],
+    nodePositions: Map<string, { x: number; y: number }>
+  ) {
+    renderNebulae(this.nebulaLayer, clusters, nodePositions);
   }
 
   destroy() {

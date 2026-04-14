@@ -1,19 +1,29 @@
 <script lang="ts">
   import Galaxy from "./lib/Galaxy.svelte";
+  import DetailPanel from "./lib/DetailPanel.svelte";
+  import Sidebar from "./lib/Sidebar.svelte";
+  import StatsView from "./lib/StatsView.svelte";
+  import GhostList from "./lib/GhostList.svelte";
+  import SearchPalette from "./lib/SearchPalette.svelte";
   import { currentView } from "./lib/stores";
 </script>
 
 <div class="app-layout">
-  <div class="galaxy-container">
+  <Sidebar />
+
+  <div class="main-content">
     {#if $currentView === "galaxy"}
       <Galaxy />
-    {:else}
-      <p style="color: var(--text-muted); text-align: center; margin-top: 40vh;">
-        {$currentView} view — coming soon
-      </p>
+      <DetailPanel />
+    {:else if $currentView === "stats"}
+      <StatsView />
+    {:else if $currentView === "ghosts"}
+      <GhostList />
     {/if}
   </div>
 </div>
+
+<SearchPalette />
 
 <style>
   .app-layout {
@@ -22,7 +32,7 @@
     height: 100%;
   }
 
-  .galaxy-container {
+  .main-content {
     flex: 1;
     position: relative;
     overflow: hidden;
