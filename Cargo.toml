@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2021"
 description = "A portable, human-memory-inspired memory layer for AI systems"
 
+[lib]
+name = "synaptic_graph"
+path = "src/lib.rs"
+
+[[bin]]
+name = "synaptic-graph"
+path = "src/main.rs"
+
 [dependencies]
 rmcp = { version = "0.1", features = ["server", "transport-io", "macros"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
