@@ -3,11 +3,13 @@
 use std::sync::{Arc, Mutex};
 
 use crate::activation::ActivationEngine;
+use crate::backup;
 use crate::db::Database;
 use crate::ghost;
 use crate::ingestion;
 use crate::models::*;
 use crate::session::Session;
+use crate::sync;
 
 use rmcp::model::{ServerCapabilities, ServerInfo};
 use rmcp::{ServerHandler, schemars, tool};
@@ -349,6 +351,57 @@ impl MemoryGraphServer {
         serde_json::to_string_pretty(&response)
             .map_err(|e| format!("Serialization error: {}", e))
     }
+
+    pub fn handle_create_backup(&self, backup_path: String) -> Result<String, String> {
+        let db = self.db.lock().unwrap();
+        let result = backup::create_backup(&db, &backup_path)?;
+
+        let response = serde_json::json!({
+            "path": result.path,
+            "checksum": result.checksum,
+            "impulse_count": result.impulse_count,
+            "connection_count": result.connection_count,
+            "size_bytes": result.size_bytes,
+        });
+
+        serde_json::to_string_pretty(&response)
+            .map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_sync_export(
+        &self,
+        sync_dir: String,
+        device_id: String,
+    ) -> Result<String, String> {
+        let db = self.db.lock().unwrap();
+        let result = sync::export_snapshot(&db, &sync_dir, &device_id)?;
+
+        let response = serde_json::json!({
+            "snapshot_path": result.snapshot_path,
+            "checksum": result.checksum,
+        });
+
+        serde_json::to_string_pretty(&response)
+            .map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_sync_status(
+        &self,
+        sync_dir: String,
+        device_id: String,
+    ) -> Result<String, String> {
+        let result = sync::check_sync_status(&sync_dir, &device_id)?;
+
+        let response = serde_json::json!({
+            "has_remote_updates": result.has_remote_updates,
+            "remote_devices": result.remote_devices,
+            "latest_remote_device": result.latest_remote_device,
+            "latest_remote_time": result.latest_remote_time,
+        });
+
+        serde_json::to_string_pretty(&response)
+            .map_err(|e| format!("Serialization error: {}", e))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -471,6 +524,28 @@ pub struct PullThroughParams {
     /// Pull mode: 'session_only' (default) or 'permanent'.
     #[schemars(default)]
     pub mode: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CreateBackupParams {
+    /// The file path where the backup should be written.
+    pub backup_path: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SyncExportParams {
+    /// The directory to export the sync snapshot into.
+    pub sync_dir: String,
+    /// A unique identifier for this device.
+    pub device_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SyncStatusParams {
+    /// The sync directory to check for remote updates.
+    pub sync_dir: String,
+    /// The local device identifier.
+    pub device_id: String,
 }
 
 #[tool(tool_box)]
@@ -597,6 +672,32 @@ impl McpHandler {
             params.external_ref,
             params.mode,
         )
+    }
+
+    #[tool(description = "Create a backup of the memory graph database")]
+    fn create_backup(
+        &self,
+        #[tool(aggr)] params: CreateBackupParams,
+    ) -> Result<String, String> {
+        self.inner.handle_create_backup(params.backup_path)
+    }
+
+    #[tool(description = "Export a sync snapshot of the database for cross-device synchronization")]
+    fn sync_export(
+        &self,
+        #[tool(aggr)] params: SyncExportParams,
+    ) -> Result<String, String> {
+        self.inner
+            .handle_sync_export(params.sync_dir, params.device_id)
+    }
+
+    #[tool(description = "Check sync directory for remote device updates")]
+    fn sync_status(
+        &self,
+        #[tool(aggr)] params: SyncStatusParams,
+    ) -> Result<String, String> {
+        self.inner
+            .handle_sync_status(params.sync_dir, params.device_id)
     }
 }
 

@@ -237,3 +237,31 @@ fn test_pull_through_tool() {
     let response = result.unwrap();
     assert!(response.contains("Rust"));
 }
+
+#[test]
+fn test_backup_tool() {
+    let tmp_dir = TempDir::new().unwrap();
+    let db_path = tmp_dir.path().join("test.db");
+    let backup_path = tmp_dir.path().join("backup.db");
+
+    let server = MemoryGraphServer::new(db_path.to_str().unwrap()).unwrap();
+
+    // Save a memory so there's data
+    server
+        .handle_save_memory(
+            "Backup test memory".to_string(),
+            "observation".to_string(),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+    let result = server.handle_create_backup(backup_path.to_str().unwrap().to_string());
+    assert!(result.is_ok());
+
+    let response: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
+    assert!(response["checksum"].as_str().unwrap().len() > 0);
+    assert_eq!(response["impulse_count"], 1);
+    assert!(response["size_bytes"].as_u64().unwrap() > 0);
+}
