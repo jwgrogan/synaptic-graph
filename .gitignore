@@ -8,3 +8,5 @@ tmp/
 .superpowers/
 target/
 node_modules/
+dist/
+ui/dist/
