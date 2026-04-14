@@ -1,68 +1,31 @@
 # memory-graph
 
-`memory-graph` is a docs-first exploration of a portable memory graph for LLMs: a user-owned, inspectable memory layer that can travel across assistants, providers, and surfaces without making any single tool the system of record.
+A portable, human-memory-inspired memory layer for AI systems. User-owned, local-first, inspectable.
 
-The core thesis is simple: memory should belong to the user. Providers and assistants can contribute to it and retrieve from it, but the durable memory model should live outside any one chat app, coding agent, or hosted platform.
+## What This Is
 
-## Why this exists
+memory-graph is a personal memory prosthetic deployed as an MCP server. It stores what was learned from AI interactions as a graph of weighted, decaying connections — replicating how human memory works rather than how databases work. Memories strengthen with use, fade with neglect, and reconstruct narratives on demand instead of replaying stored summaries.
 
-Today, memory is fragmented.
+It overlays any external knowledge base (Obsidian, codebases, conversation archives) as a ghost graph — learning which parts of your existing knowledge matter most without copying or modifying the source.
 
-- Providers retain partial context inside their own products.
-- Context gets lost between chat, planning, and coding surfaces.
-- Existing knowledge bases are hard to reuse cleanly inside AI workflows.
-- Users often have to choose between keeping notes in source systems or polluting them with AI-generated artifacts.
+## Core Ideas
 
-This project explores a different model: a portable graph-shaped memory layer that can ingest interactions, preserve provenance, and assemble context for downstream assistants without forcing the source knowledge base to become the canonical backend.
-
-## BYOKB, Without Source Pollution
-
-One design goal is BYOKB: bring your own knowledge base.
-
-That means the system should be able to:
-
-- leverage existing tools such as Obsidian and other markdown-based knowledge bases
-- reference or derive memory from those sources without making them the canonical storage layer
-- generate a new unified knowledge base view from source material when that is useful
-- avoid polluting the original source with assistant-generated structure unless the user explicitly wants that
-
-## Product Boundary
-
-This repo is intentionally framed around the portable memory service first.
-
-- The memory graph is the primary product concept.
-- Assistants are clients of that memory graph, not the owners of its schema or persistence.
-- An assistant can act as an injection surface for new memory and a retrieval surface for relevant context.
-- The exact integration mechanism is still open and is not fixed in this repo.
+- **Impulses, not episodes.** The system stores what was learned, not what happened. Episodes are provenance, not memory.
+- **Connections are the memory.** Weighted edges between impulses carry the real value. They decay without use and strengthen through retrieval.
+- **Demand-driven synthesis.** Narratives are reconstructed at query time, never stored. No automatic compilation, no bloat, no hallucinated summaries.
+- **Ghost graphs.** External KBs are overlaid as shadow topologies. Content is pulled on demand, never copied. The source stays clean.
+- **User owns everything.** Local-first, inspectable, exportable, deletable. Incognito mode means zero trace.
 
 ## Current Status
 
-This is an exploratory, docs-first repository.
+Docs-first. No runnable service yet. The design philosophy, product requirements, and technical direction are documented and ready for Phase 1 implementation.
 
-- No runnable service is included yet.
-- No public transport or endpoint contract is locked.
-- No schema, sync protocol, or provider-specific adapter is treated as final.
-- The initial focus is product framing, architecture direction, and repo-level clarity.
+## Documentation
 
-## Conceptual Capabilities
-
-These capability names are illustrative only. They describe the shape of the problem space, not a committed API:
-
-- `ingest_interaction`
-- `retrieve_context`
-- `save_memory`
-- `update_memory`
-- `delete_memory`
-- `export_view`
-- `open_note`
-
-## Repository Guide
-
-- [Vision](./docs/vision.md)
-- [Architecture Direction](./docs/architecture.md)
-- [Assistant Client Note](./docs/integrations/assistant-client.md)
-- [Roadmap](./docs/roadmap.md)
-- [Source Note](./docs/source-notes/graph-memory.md)
+- [Philosophy](./docs/philosophy.md) — the human-memory-inspired design thinking behind every decision
+- [PRD](./docs/PRD.md) — product requirements, capabilities, roadmap with validation gates
+- [TRD](./docs/TRD.md) — architecture, data model, activation math, MCP tool surface
+- [Source Note](./docs/source-notes/graph-memory.md) — original planning document, preserved for provenance
 
 ## Repo Layout
 
@@ -70,11 +33,9 @@ These capability names are illustrative only. They describe the shape of the pro
 .
 ├── README.md
 └── docs/
-    ├── architecture.md
-    ├── integrations/
-    │   └── assistant-client.md
-    ├── roadmap.md
-    ├── source-notes/
-    │   └── graph-memory.md
-    └── vision.md
+    ├── philosophy.md
+    ├── PRD.md
+    ├── TRD.md
+    └── source-notes/
+        └── graph-memory.md
 ```
