@@ -263,6 +263,49 @@ impl MemoryGraphServer {
         Ok(format!("{{\"dismissed\": \"{}\"}}", id))
     }
 
+    pub fn handle_quick_save(
+        &self,
+        content: String,
+        impulse_type: String,
+        emotional_valence: Option<String>,
+        engagement_level: Option<String>,
+        source_ref: Option<String>,
+    ) -> Result<String, String> {
+        if self.is_incognito() {
+            return Err("Cannot save memory in incognito mode".to_string());
+        }
+
+        let itype = ImpulseType::from_str(&impulse_type)
+            .ok_or_else(|| format!("Invalid impulse type: {}", impulse_type))?;
+
+        let valence = emotional_valence
+            .as_deref()
+            .map(EmotionalValence::from_str)
+            .unwrap_or(Some(EmotionalValence::Neutral))
+            .ok_or("Invalid emotional valence")?;
+
+        let engagement = engagement_level
+            .as_deref()
+            .map(EngagementLevel::from_str)
+            .unwrap_or(Some(EngagementLevel::Medium))
+            .ok_or("Invalid engagement level")?;
+
+        let sref = source_ref.unwrap_or_default();
+
+        let db = self.db.lock().unwrap();
+        let impulse = ingestion::save_and_confirm(
+            &db,
+            &content,
+            itype,
+            valence,
+            engagement,
+            vec![],
+            &sref,
+        )?;
+
+        serde_json::to_string_pretty(&impulse).map_err(|e| format!("Serialization error: {}", e))
+    }
+
     pub fn handle_list_candidates(&self) -> Result<String, String> {
         let db = self.db.lock().unwrap();
         let candidates = db.list_candidates()
@@ -639,6 +682,20 @@ impl McpHandler {
     #[tool(description = "List all candidate memory proposals")]
     fn list_candidates(&self) -> Result<String, String> {
         self.inner.handle_list_candidates()
+    }
+
+    #[tool(description = "Save and immediately confirm a memory in one step. Use this for proactive saves during conversations — skips the candidate review step. Types: heuristic, preference, decision, pattern, observation.")]
+    fn quick_save(
+        &self,
+        #[tool(aggr)] params: SaveMemoryParams,
+    ) -> Result<String, String> {
+        self.inner.handle_quick_save(
+            params.content,
+            params.impulse_type,
+            params.emotional_valence,
+            params.engagement_level,
+            params.source_ref,
+        )
     }
 
     #[tool(description = "Register an external knowledge base as a ghost graph. Scans the directory for markdown files and maps their structure without ingesting content.")]
