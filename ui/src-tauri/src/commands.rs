@@ -286,3 +286,29 @@ pub fn quick_save(
         "status": impulse.status.as_str(),
     }))
 }
+
+#[tauri::command]
+pub fn register_external_graph(
+    state: State<AppState>,
+    name: String,
+    root_path: String,
+    source_type: Option<String>,
+) -> Result<serde_json::Value, String> {
+    use synaptic_graph::ghost;
+    use synaptic_graph::ghost::scanner::ScanConfig;
+
+    let stype = source_type.unwrap_or_else(|| "directory".to_string());
+    let config = ScanConfig {
+        extensions: vec!["md".to_string()],
+        ignore_patterns: vec![".trash".to_string(), ".obsidian".to_string()],
+    };
+
+    let db = state.db.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let count = ghost::register_and_scan(&db, &name, &root_path, &stype, &config)?;
+
+    Ok(serde_json::json!({
+        "name": name,
+        "root_path": root_path,
+        "nodes_scanned": count,
+    }))
+}

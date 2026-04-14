@@ -9,6 +9,7 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::get_all_impulses,
@@ -19,6 +20,7 @@ fn main() {
             commands::get_ghost_sources,
             commands::get_ghost_nodes,
             commands::quick_save,
+            commands::register_external_graph,
         ])
         .run(tauri::generate_context!())
         .expect("error while running memory-graph-ui");
