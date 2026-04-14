@@ -12,7 +12,7 @@ pub struct AppState {
 
 fn default_db_path() -> PathBuf {
     let mut path = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("memory-graph");
+    path.push("synaptic-graph");
     std::fs::create_dir_all(&path).ok();
     path.push("memory.db");
     path
