@@ -1,5 +1,5 @@
 [package]
-name = "memory-graph"
+name = "synaptic-graph"
 version = "0.1.0"
 edition = "2021"
 description = "A portable, human-memory-inspired memory layer for AI systems"

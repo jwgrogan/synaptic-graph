@@ -1,4 +1,4 @@
-use memory_graph::redaction;
+use synaptic_graph::redaction;
 
 #[test]
 fn test_redacts_aws_access_key() {

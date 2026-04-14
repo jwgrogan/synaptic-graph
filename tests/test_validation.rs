@@ -2,13 +2,13 @@ mod common;
 
 mod test_validation {
     use crate::common;
-    use memory_graph::activation::ActivationEngine;
-    use memory_graph::db::Database;
-    use memory_graph::ingestion;
-    use memory_graph::models::*;
-    use memory_graph::redaction;
-    use memory_graph::server::MemoryGraphServer;
-    use memory_graph::weight;
+    use synaptic_graph::activation::ActivationEngine;
+    use synaptic_graph::db::Database;
+    use synaptic_graph::ingestion;
+    use synaptic_graph::models::*;
+    use synaptic_graph::redaction;
+    use synaptic_graph::server::MemoryGraphServer;
+    use synaptic_graph::weight;
 
     // ---------------------------------------------------------------
     // 1. Store-retrieve round trip

@@ -1,4 +1,4 @@
-use memory_graph::session::Session;
+use synaptic_graph::session::Session;
 
 #[test]
 fn test_session_starts_not_incognito() {

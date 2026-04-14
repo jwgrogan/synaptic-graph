@@ -2,8 +2,8 @@ mod common;
 
 mod test_ingestion {
     use crate::common;
-    use memory_graph::ingestion::*;
-    use memory_graph::models::*;
+    use synaptic_graph::ingestion::*;
+    use synaptic_graph::models::*;
 
     #[test]
     fn test_explicit_save_creates_impulse() {

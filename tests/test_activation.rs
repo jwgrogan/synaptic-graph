@@ -1,9 +1,9 @@
 mod common;
 
-use memory_graph::activation::ActivationEngine;
-use memory_graph::models::*;
+use synaptic_graph::activation::ActivationEngine;
+use synaptic_graph::models::*;
 
-fn seed_graph(db: &memory_graph::db::Database) -> (String, String, String) {
+fn seed_graph(db: &synaptic_graph::db::Database) -> (String, String, String) {
     // Create three connected impulses: A -> B -> C
     // All confirmed so they appear in FTS search
     let a = db

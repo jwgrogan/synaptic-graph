@@ -1,6 +1,6 @@
 mod common;
 
-use memory_graph::server::MemoryGraphServer;
+use synaptic_graph::server::MemoryGraphServer;
 
 #[test]
 fn test_save_memory_tool() {

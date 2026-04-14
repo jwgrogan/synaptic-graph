@@ -1,6 +1,6 @@
 mod common;
 
-use memory_graph::models::*;
+use synaptic_graph::models::*;
 
 #[test]
 fn test_database_creates_tables() {

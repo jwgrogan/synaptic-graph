@@ -1,7 +1,7 @@
 mod common;
 
-use memory_graph::models::*;
-use memory_graph::weight;
+use synaptic_graph::models::*;
+use synaptic_graph::weight;
 
 #[test]
 fn test_effective_weight_no_decay() {

@@ -1,4 +1,4 @@
-use memory_graph::server::{McpHandler, MemoryGraphServer};
+use synaptic_graph::server::{McpHandler, MemoryGraphServer};
 use rmcp::ServiceExt;
 
 #[tokio::main]
@@ -14,13 +14,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Determine database path:
     //   1. MEMORY_GRAPH_DB env var, or
-    //   2. <data_local_dir>/memory-graph/memory.db
+    //   2. <data_local_dir>/synaptic-graph/memory.db
     let db_path = match std::env::var("MEMORY_GRAPH_DB") {
         Ok(p) if !p.is_empty() => std::path::PathBuf::from(p),
         _ => {
             let base = dirs::data_local_dir()
                 .ok_or("Could not determine data_local_dir for this platform")?;
-            base.join("memory-graph").join("memory.db")
+            base.join("synaptic-graph").join("memory.db")
         }
     };
 

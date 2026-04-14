@@ -460,7 +460,7 @@ impl ServerHandler for McpHandler {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "memory-graph: a portable, human-memory-inspired memory layer for AI systems"
+                "synaptic-graph: a portable, human-memory-inspired memory layer for AI systems"
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),

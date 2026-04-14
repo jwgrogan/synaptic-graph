@@ -1,10 +1,10 @@
-# memory-graph
+# synaptic-graph
 
 A portable, human-memory-inspired memory layer for AI systems. User-owned, local-first, inspectable.
 
 ## What This Is
 
-memory-graph is a personal memory prosthetic deployed as an MCP server. It stores what was learned from AI interactions as a graph of weighted, decaying connections — replicating how human memory works rather than how databases work. Memories strengthen with use, fade with neglect, and reconstruct narratives on demand instead of replaying stored summaries.
+synaptic-graph is a personal memory prosthetic deployed as an MCP server. It stores what was learned from AI interactions as a graph of weighted, decaying connections — replicating how human memory works rather than how databases work. Memories strengthen with use, fade with neglect, and reconstruct narratives on demand instead of replaying stored summaries.
 
 It overlays any external knowledge base (Obsidian, codebases, conversation archives) as a ghost graph — learning which parts of your existing knowledge matter most without copying or modifying the source.
 
@@ -18,7 +18,7 @@ It overlays any external knowledge base (Obsidian, codebases, conversation archi
 
 ## Current Status
 
-Docs-first. No runnable service yet. The design philosophy, product requirements, and technical direction are documented and ready for Phase 1 implementation.
+Phase 1 complete. Working MCP server with 66 tests passing. 11 MCP tools: save, retrieve, delete, update, inspect, confirm, dismiss, list candidates, status, incognito, explain recall.
 
 ## Documentation
 
