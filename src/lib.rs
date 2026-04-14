@@ -1,4 +1,5 @@
 pub mod activation;
+pub mod backup;
 pub mod db;
 pub mod extraction;
 pub mod ghost;
@@ -7,4 +8,5 @@ pub mod models;
 pub mod redaction;
 pub mod server;
 pub mod session;
+pub mod sync;
 pub mod weight;

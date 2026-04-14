@@ -166,6 +166,43 @@ impl Database {
         self.get_impulse(&id)
     }
 
+    pub fn insert_impulse_with_id(&self, id: &str, input: &NewImpulse) -> SqlResult<Impulse> {
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+        let signals_json = serde_json::to_string(&input.source_signals).unwrap_or_default();
+
+        self.conn.execute(
+            "INSERT INTO impulses (id, content, impulse_type, weight, initial_weight,
+             emotional_valence, engagement_level, source_signals, created_at, last_accessed_at,
+             source_type, source_ref, status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                id,
+                input.content,
+                input.impulse_type.as_str(),
+                input.initial_weight,
+                input.initial_weight,
+                input.emotional_valence.as_str(),
+                input.engagement_level.as_str(),
+                signals_json,
+                now_str,
+                now_str,
+                input.source_type.as_str(),
+                input.source_ref,
+                "candidate",
+            ],
+        )?;
+
+        // Insert into FTS index
+        self.conn.execute(
+            "INSERT INTO impulses_fts (rowid, content)
+             SELECT rowid, content FROM impulses WHERE id = ?1",
+            params![id],
+        )?;
+
+        self.get_impulse(id)
+    }
+
     pub fn get_impulse(&self, id: &str) -> SqlResult<Impulse> {
         self.conn.query_row(
             "SELECT id, content, impulse_type, weight, initial_weight,
@@ -564,6 +601,13 @@ impl Database {
         )?;
         let rows = stmt.query_map([], |row| Ok(row_to_ghost_source(row)))?;
         rows.collect()
+    }
+
+    // === Backup ===
+
+    pub fn vacuum_into(&self, path: &str) -> SqlResult<()> {
+        self.conn.execute_batch(&format!("VACUUM INTO '{}'", path.replace('\'', "''")))?;
+        Ok(())
     }
 
     // === Stats ===
