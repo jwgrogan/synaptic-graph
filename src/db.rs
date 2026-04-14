@@ -405,6 +405,11 @@ impl Database {
             .query_row("SELECT COUNT(*) FROM connections", [], |row| row.get(0))
     }
 
+    pub fn delete_connection(&self, id: &str) -> SqlResult<()> {
+        self.conn.execute("DELETE FROM connections WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     // === Ghost Node Operations ===
 
     pub fn insert_ghost_node(&self, input: &NewGhostNode) -> SqlResult<GhostNode> {

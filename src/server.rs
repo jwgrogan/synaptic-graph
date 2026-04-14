@@ -315,6 +315,33 @@ impl MemoryGraphServer {
             .map_err(|e| format!("Serialization error: {}", e))
     }
 
+    pub fn handle_link_memories(
+        &self,
+        source_id: String,
+        target_id: String,
+        relationship: Option<String>,
+        weight: Option<f64>,
+    ) -> Result<String, String> {
+        if self.is_incognito() {
+            return Err("Cannot link memories in incognito mode".to_string());
+        }
+        let db = self.db.lock().unwrap();
+        let rel = relationship.unwrap_or_else(|| "relates_to".to_string());
+        let w = weight.unwrap_or(0.5);
+        let conn = ingestion::manual_link(&db, &source_id, &target_id, &rel, w)?;
+        serde_json::to_string_pretty(&conn)
+            .map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_unlink_memories(&self, connection_id: String) -> Result<String, String> {
+        if self.is_incognito() {
+            return Err("Cannot unlink memories in incognito mode".to_string());
+        }
+        let db = self.db.lock().unwrap();
+        ingestion::unlink(&db, &connection_id)?;
+        Ok(format!("{{\"unlinked\": \"{}\"}}", connection_id))
+    }
+
     pub fn handle_register_ghost_graph(
         &self,
         name: String,
@@ -539,6 +566,26 @@ pub struct DismissProposalParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct LinkMemoriesParams {
+    /// ID of the source memory.
+    pub source_id: String,
+    /// ID of the target memory.
+    pub target_id: String,
+    /// Relationship label (e.g., 'relates_to', 'derived_from'). Defaults to 'relates_to'.
+    #[schemars(default)]
+    pub relationship: Option<String>,
+    /// Connection weight (0.0 to 1.0). Defaults to 0.5.
+    #[schemars(default)]
+    pub weight: Option<f64>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UnlinkMemoriesParams {
+    /// The ID of the connection to remove.
+    pub connection_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct RegisterGhostGraphParams {
     /// Name for this ghost graph (e.g., 'obsidian-vault').
     pub name: String,
@@ -696,6 +743,27 @@ impl McpHandler {
             params.engagement_level,
             params.source_ref,
         )
+    }
+
+    #[tool(description = "Create a connection between two memories. Use for manually linking related impulses.")]
+    fn link_memories(
+        &self,
+        #[tool(aggr)] params: LinkMemoriesParams,
+    ) -> Result<String, String> {
+        self.inner.handle_link_memories(
+            params.source_id,
+            params.target_id,
+            params.relationship,
+            params.weight,
+        )
+    }
+
+    #[tool(description = "Remove a connection between two memories by connection ID.")]
+    fn unlink_memories(
+        &self,
+        #[tool(aggr)] params: UnlinkMemoriesParams,
+    ) -> Result<String, String> {
+        self.inner.handle_unlink_memories(params.connection_id)
     }
 
     #[tool(description = "Register an external knowledge base as a ghost graph. Scans the directory for markdown files and maps their structure without ingesting content.")]
