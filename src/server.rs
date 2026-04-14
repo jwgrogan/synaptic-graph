@@ -763,7 +763,20 @@ impl ServerHandler for McpHandler {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "synaptic-graph: a portable, human-memory-inspired memory layer for AI systems"
+                concat!(
+                    "synaptic-graph: a portable, human-memory-inspired memory layer for AI systems.\n\n",
+                    "AUTO-SAVE: Proactively save important information during conversations:\n",
+                    "- Design decisions and their reasoning → quick_save with type 'decision'\n",
+                    "- User preferences and opinions → quick_save with type 'preference'\n",
+                    "- Non-obvious insights from discussion → quick_save with type 'heuristic'\n",
+                    "- Patterns about how the user works → quick_save with type 'pattern'\n",
+                    "- Bug root causes and lessons learned → quick_save with type 'observation'\n",
+                    "Do NOT save: routine commands, trivial Q&A, info already in code/git.\n",
+                    "Set emotional_valence (positive/negative/neutral) and engagement_level (low/medium/high) based on conversation tone.\n\n",
+                    "AUTO-RECALL: At the start of complex tasks, call retrieve_context with a description of the task to surface relevant prior knowledge.\n\n",
+                    "quick_save is preferred over save_memory for proactive saves (saves and confirms in one call).\n",
+                    "save_memory creates a candidate for user review; use it when the user explicitly asks to save something.\n",
+                )
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
