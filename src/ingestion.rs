@@ -42,6 +42,7 @@ pub fn explicit_save(
 /// Save content as a candidate impulse and also insert connections.
 ///
 /// Each connection is a tuple of (target_id, relationship, weight).
+#[allow(clippy::too_many_arguments)]
 pub fn explicit_save_with_connections(
     db: &Database,
     content: &str,
@@ -106,6 +107,7 @@ pub fn save_and_confirm(
 }
 
 /// Save content with connections and immediately confirm it.
+#[allow(clippy::too_many_arguments)]
 pub fn save_and_confirm_with_connections(
     db: &Database,
     content: &str,

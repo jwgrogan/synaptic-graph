@@ -3,6 +3,7 @@ mod common;
 use synaptic_graph::activation::ActivationEngine;
 use synaptic_graph::ghost;
 use synaptic_graph::ghost::ScanConfig;
+use synaptic_graph::ingestion;
 use synaptic_graph::models::*;
 
 fn seed_graph(db: &synaptic_graph::db::Database) -> (String, String, String) {
@@ -397,4 +398,360 @@ fn test_activation_includes_ghost_nodes() {
 
     // Verify activation score is above threshold
     assert!(result.ghost_activations[0].activation_score >= ACTIVATION_THRESHOLD);
+}
+
+// === Edge case and stress tests (Phase 4, Task 4) ===
+
+#[test]
+fn test_activation_with_empty_graph() {
+    let db = common::test_db();
+    let engine = ActivationEngine::new(&db);
+    let result = engine
+        .retrieve(&RetrievalRequest {
+            query: "anything".to_string(),
+            max_results: 10,
+            max_hops: 3,
+        })
+        .unwrap();
+    assert!(result.memories.is_empty());
+}
+
+#[test]
+fn test_activation_with_single_node() {
+    let db = common::test_db();
+    ingestion::save_and_confirm(
+        &db,
+        "Single isolated node",
+        ImpulseType::Observation,
+        EmotionalValence::Neutral,
+        EngagementLevel::Medium,
+        vec![],
+        "test",
+    )
+    .unwrap();
+
+    let engine = ActivationEngine::new(&db);
+    let result = engine
+        .retrieve(&RetrievalRequest {
+            query: "single isolated".to_string(),
+            max_results: 10,
+            max_hops: 3,
+        })
+        .unwrap();
+    assert_eq!(result.memories.len(), 1);
+}
+
+#[test]
+fn test_activation_with_disconnected_clusters() {
+    let db = common::test_db();
+
+    // Cluster 1: A -> B
+    let a = ingestion::save_and_confirm(
+        &db,
+        "Rust ownership patterns",
+        ImpulseType::Heuristic,
+        EmotionalValence::Positive,
+        EngagementLevel::High,
+        vec![],
+        "test",
+    )
+    .unwrap();
+    ingestion::save_and_confirm_with_connections(
+        &db,
+        "Borrow checker prevents data races",
+        ImpulseType::Pattern,
+        EmotionalValence::Positive,
+        EngagementLevel::Medium,
+        vec![],
+        "test",
+        &[(a.id.clone(), "relates_to".to_string(), 0.8)],
+    )
+    .unwrap();
+
+    // Cluster 2: C -> D (disconnected from cluster 1)
+    let c = ingestion::save_and_confirm(
+        &db,
+        "PostgreSQL connection pooling",
+        ImpulseType::Heuristic,
+        EmotionalValence::Neutral,
+        EngagementLevel::Medium,
+        vec![],
+        "test",
+    )
+    .unwrap();
+    ingestion::save_and_confirm_with_connections(
+        &db,
+        "Database connections are expensive to create",
+        ImpulseType::Pattern,
+        EmotionalValence::Neutral,
+        EngagementLevel::Low,
+        vec![],
+        "test",
+        &[(c.id.clone(), "relates_to".to_string(), 0.7)],
+    )
+    .unwrap();
+
+    let engine = ActivationEngine::new(&db);
+
+    // Query about Rust should NOT activate PostgreSQL cluster
+    let result = engine
+        .retrieve(&RetrievalRequest {
+            query: "Rust ownership borrow".to_string(),
+            max_results: 10,
+            max_hops: 3,
+        })
+        .unwrap();
+
+    let has_postgres = result
+        .memories
+        .iter()
+        .any(|m| m.impulse.content.contains("PostgreSQL"));
+    assert!(
+        !has_postgres,
+        "Disconnected cluster should not activate"
+    );
+}
+
+#[test]
+fn test_activation_at_scale_100_nodes() {
+    let db = common::test_db();
+    let mut ids = Vec::new();
+
+    // Create 100 confirmed impulses
+    for i in 0..100 {
+        let impulse = db
+            .insert_impulse(&NewImpulse {
+                content: format!("Memory node {} about topic {}", i, i % 10),
+                impulse_type: ImpulseType::Observation,
+                initial_weight: 0.5,
+                emotional_valence: EmotionalValence::Neutral,
+                engagement_level: EngagementLevel::Medium,
+                source_signals: vec![],
+                source_type: SourceType::ExplicitSave,
+                source_ref: "test".to_string(),
+            })
+            .unwrap();
+        db.confirm_impulse(&impulse.id).unwrap();
+        ids.push(impulse.id);
+    }
+
+    // Create connections: each node to the next (chain)
+    for i in 0..99 {
+        db.insert_connection(&NewConnection {
+            source_id: ids[i].clone(),
+            target_id: ids[i + 1].clone(),
+            weight: 0.5,
+            relationship: "next".to_string(),
+        })
+        .unwrap();
+    }
+
+    let engine = ActivationEngine::new(&db);
+
+    // Time the retrieval
+    let start = std::time::Instant::now();
+    let result = engine
+        .retrieve(&RetrievalRequest {
+            query: "Memory node 0 topic".to_string(),
+            max_results: 10,
+            max_hops: 5,
+        })
+        .unwrap();
+    let duration = start.elapsed();
+
+    assert!(!result.memories.is_empty());
+    assert!(
+        duration.as_millis() < 1000,
+        "Retrieval took {}ms at 100 nodes",
+        duration.as_millis()
+    );
+}
+
+#[test]
+fn test_activation_at_scale_1000_nodes() {
+    let db = common::test_db();
+    let mut ids = Vec::new();
+
+    for i in 0..1000 {
+        let impulse = db
+            .insert_impulse(&NewImpulse {
+                content: format!("Scale test node {} category {}", i, i % 50),
+                impulse_type: ImpulseType::Observation,
+                initial_weight: 0.5,
+                emotional_valence: EmotionalValence::Neutral,
+                engagement_level: EngagementLevel::Medium,
+                source_signals: vec![],
+                source_type: SourceType::ExplicitSave,
+                source_ref: "test".to_string(),
+            })
+            .unwrap();
+        db.confirm_impulse(&impulse.id).unwrap();
+        ids.push(impulse.id);
+    }
+
+    // Create a more realistic graph: each node connected to 3 others
+    for i in 0..1000 {
+        for offset in [1, 7, 23] {
+            let target = (i + offset) % 1000;
+            let _ = db.insert_connection(&NewConnection {
+                source_id: ids[i].clone(),
+                target_id: ids[target].clone(),
+                weight: 0.4,
+                relationship: "relates_to".to_string(),
+            });
+        }
+    }
+
+    let engine = ActivationEngine::new(&db);
+
+    let start = std::time::Instant::now();
+    let result = engine
+        .retrieve(&RetrievalRequest {
+            query: "Scale test node category".to_string(),
+            max_results: 10,
+            max_hops: 3,
+        })
+        .unwrap();
+    let duration = start.elapsed();
+
+    assert!(!result.memories.is_empty());
+    // TRD says target is under 200ms for 10K nodes in release; debug builds are slower
+    assert!(
+        duration.as_secs() < 5,
+        "Retrieval took {}ms at 1000 nodes",
+        duration.as_millis()
+    );
+}
+
+#[test]
+fn test_activation_with_cycle() {
+    let db = common::test_db();
+
+    // A -> B -> C -> A (cycle)
+    let a = ingestion::save_and_confirm(
+        &db,
+        "Cycle node A",
+        ImpulseType::Observation,
+        EmotionalValence::Neutral,
+        EngagementLevel::Medium,
+        vec![],
+        "test",
+    )
+    .unwrap();
+    let b = ingestion::save_and_confirm(
+        &db,
+        "Cycle node B",
+        ImpulseType::Observation,
+        EmotionalValence::Neutral,
+        EngagementLevel::Medium,
+        vec![],
+        "test",
+    )
+    .unwrap();
+    let c = ingestion::save_and_confirm(
+        &db,
+        "Cycle node C",
+        ImpulseType::Observation,
+        EmotionalValence::Neutral,
+        EngagementLevel::Medium,
+        vec![],
+        "test",
+    )
+    .unwrap();
+
+    db.insert_connection(&NewConnection {
+        source_id: a.id.clone(),
+        target_id: b.id.clone(),
+        weight: 0.8,
+        relationship: "next".to_string(),
+    })
+    .unwrap();
+    db.insert_connection(&NewConnection {
+        source_id: b.id.clone(),
+        target_id: c.id.clone(),
+        weight: 0.8,
+        relationship: "next".to_string(),
+    })
+    .unwrap();
+    db.insert_connection(&NewConnection {
+        source_id: c.id.clone(),
+        target_id: a.id.clone(),
+        weight: 0.8,
+        relationship: "next".to_string(),
+    })
+    .unwrap();
+
+    let engine = ActivationEngine::new(&db);
+
+    // Should not infinite loop
+    let start = std::time::Instant::now();
+    let result = engine
+        .retrieve(&RetrievalRequest {
+            query: "Cycle node".to_string(),
+            max_results: 10,
+            max_hops: 10,
+        })
+        .unwrap();
+    let duration = start.elapsed();
+
+    assert!(!result.memories.is_empty());
+    assert!(
+        duration.as_millis() < 1000,
+        "Cycle detection failed — took {}ms",
+        duration.as_millis()
+    );
+}
+
+#[test]
+fn test_activation_max_results_zero() {
+    let db = common::test_db();
+    ingestion::save_and_confirm(
+        &db,
+        "Some memory",
+        ImpulseType::Observation,
+        EmotionalValence::Neutral,
+        EngagementLevel::Medium,
+        vec![],
+        "test",
+    )
+    .unwrap();
+
+    let engine = ActivationEngine::new(&db);
+    let result = engine
+        .retrieve(&RetrievalRequest {
+            query: "Some memory".to_string(),
+            max_results: 0,
+            max_hops: 3,
+        })
+        .unwrap();
+
+    assert!(result.memories.is_empty());
+}
+
+#[test]
+fn test_activation_empty_query() {
+    let db = common::test_db();
+    ingestion::save_and_confirm(
+        &db,
+        "Memory",
+        ImpulseType::Observation,
+        EmotionalValence::Neutral,
+        EngagementLevel::Medium,
+        vec![],
+        "test",
+    )
+    .unwrap();
+
+    let engine = ActivationEngine::new(&db);
+    let result = engine.retrieve(&RetrievalRequest {
+        query: "".to_string(),
+        max_results: 10,
+        max_hops: 3,
+    });
+
+    // Empty query should either return empty results or an error (FTS rejects empty strings)
+    match result {
+        Ok(r) => assert!(r.memories.is_empty()),
+        Err(_) => {} // FTS syntax error on empty query is acceptable
+    }
 }

@@ -60,3 +60,69 @@ fn test_decay_rate_for_impulse_type() {
     assert_eq!(weight::decay_rate_for_type(ImpulseType::Pattern), DECAY_SEMANTIC);
     assert_eq!(weight::decay_rate_for_type(ImpulseType::Observation), DECAY_EPISODIC);
 }
+
+// --- Edge case tests for weight mechanics (Phase 4, Task 3) ---
+
+#[test]
+fn test_decay_with_zero_hours() {
+    let w = weight::effective_weight(0.5, 0.0, DECAY_SEMANTIC);
+    assert!((w - 0.5).abs() < 0.0001);
+}
+
+#[test]
+fn test_decay_with_negative_hours_treated_as_zero() {
+    // Should not panic or produce NaN
+    let w = weight::effective_weight(0.5, -10.0, DECAY_SEMANTIC);
+    assert!(w.is_finite());
+    assert!(w > 0.0);
+}
+
+#[test]
+fn test_decay_with_zero_weight() {
+    let w = weight::effective_weight(0.0, 100.0, DECAY_SEMANTIC);
+    assert_eq!(w, WEIGHT_FLOOR);
+}
+
+#[test]
+fn test_decay_with_max_weight() {
+    let w = weight::effective_weight(1.0, 0.0, DECAY_SEMANTIC);
+    assert!((w - 1.0).abs() < 0.0001);
+}
+
+#[test]
+fn test_reinforce_at_exactly_one() {
+    let w = weight::reinforce(1.0);
+    assert_eq!(w, 1.0);
+}
+
+#[test]
+fn test_reinforce_at_zero() {
+    let w = weight::reinforce(0.0);
+    assert!((w - REINFORCEMENT_BUMP).abs() < 0.0001);
+}
+
+#[test]
+fn test_decay_over_one_year() {
+    let semantic = weight::effective_weight(1.0, 8760.0, DECAY_SEMANTIC);
+    let episodic = weight::effective_weight(1.0, 8760.0, DECAY_EPISODIC);
+
+    // Semantic should still be meaningful after a year
+    assert!(semantic > 0.01, "Semantic memory should persist over a year: {}", semantic);
+
+    // Episodic should be near floor
+    assert!(episodic < 0.01, "Episodic memory should fade within a year: {}", episodic);
+
+    // Both above floor
+    assert!(semantic >= WEIGHT_FLOOR);
+    assert!(episodic >= WEIGHT_FLOOR);
+}
+
+#[test]
+fn test_repeated_reinforcement_convergence() {
+    // Reinforce 100 times — should cap at 1.0
+    let mut w = 0.1;
+    for _ in 0..100 {
+        w = weight::reinforce(w);
+    }
+    assert_eq!(w, 1.0);
+}

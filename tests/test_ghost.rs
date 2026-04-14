@@ -201,3 +201,44 @@ fn test_scan_creates_ghost_connections_from_wikilinks() {
         assert_eq!(conn.relationship, "wikilink");
     }
 }
+
+#[test]
+fn test_scan_empty_directory() {
+    let dir = TempDir::new().unwrap();
+    let config = ScanConfig {
+        extensions: vec!["md".to_string()],
+        ignore_patterns: vec![],
+    };
+    let result = scan_directory(dir.path(), &config).unwrap();
+    assert!(result.nodes.is_empty());
+    assert!(result.links.is_empty());
+}
+
+#[test]
+fn test_scan_no_matching_extensions() {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("file.txt"), "Not markdown").unwrap();
+    let config = ScanConfig {
+        extensions: vec!["md".to_string()],
+        ignore_patterns: vec![],
+    };
+    let result = scan_directory(dir.path(), &config).unwrap();
+    assert!(result.nodes.is_empty());
+}
+
+#[test]
+fn test_register_same_source_twice() {
+    let db = common::test_db();
+    let vault = create_test_vault();
+    let config = ScanConfig {
+        extensions: vec!["md".to_string()],
+        ignore_patterns: vec![],
+    };
+
+    register_and_scan(&db, "vault", vault.path().to_str().unwrap(), "obsidian", &config).unwrap();
+    // Re-scan the same source via refresh — should not error, should update
+    refresh(&db, "vault", &config).unwrap();
+
+    let sources = db.list_ghost_sources().unwrap();
+    assert_eq!(sources.len(), 1);
+}

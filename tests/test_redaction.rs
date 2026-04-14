@@ -71,3 +71,42 @@ fn test_has_secrets_check() {
     assert!(redaction::has_secrets("my key is AKIAIOSFODNN7EXAMPLE"));
     assert!(!redaction::has_secrets("just normal text here"));
 }
+
+#[test]
+fn test_redact_empty_string() {
+    let result = redaction::redact("");
+    assert_eq!(result.clean_content, "");
+    assert!(result.redactions.is_empty());
+}
+
+#[test]
+fn test_redact_very_long_content() {
+    let long = "a".repeat(100_000);
+    let result = redaction::redact(&long);
+    assert_eq!(result.clean_content.len(), 100_000);
+    assert!(result.redactions.is_empty());
+}
+
+#[test]
+fn test_redact_github_token() {
+    let input = "Use token ghp_1234567890abcdefghijklmnopqrstuvwxyz12";
+    let result = redaction::redact(input);
+    assert!(!result.clean_content.contains("ghp_"));
+}
+
+#[test]
+fn test_redact_preserves_surrounding_text() {
+    let input = "Before AKIAIOSFODNN7EXAMPLE after";
+    let result = redaction::redact(input);
+    assert!(result.clean_content.contains("Before"));
+    assert!(result.clean_content.contains("after"));
+    assert!(result.clean_content.contains("[REDACTED]"));
+}
+
+#[test]
+fn test_redact_unicode_content() {
+    let input = "Use key AKIAIOSFODNN7EXAMPLE for \u{1F600} emoji support";
+    let result = redaction::redact(input);
+    assert!(!result.clean_content.contains("AKIAIOSFODNN7EXAMPLE"));
+    assert!(result.clean_content.contains("\u{1F600}"));
+}

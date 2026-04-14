@@ -26,6 +26,7 @@ impl ImpulseType {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "heuristic" => Some(Self::Heuristic),
@@ -55,6 +56,7 @@ impl EmotionalValence {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "positive" => Some(Self::Positive),
@@ -82,6 +84,7 @@ impl EngagementLevel {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "low" => Some(Self::Low),
@@ -109,6 +112,7 @@ impl SourceType {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "explicit_save" => Some(Self::ExplicitSave),
@@ -138,6 +142,7 @@ impl ImpulseStatus {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "candidate" => Some(Self::Candidate),

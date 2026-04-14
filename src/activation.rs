@@ -16,6 +16,15 @@ impl<'a> ActivationEngine<'a> {
     }
 
     pub fn retrieve(&self, request: &RetrievalRequest) -> Result<RetrievalResult, String> {
+        // Early return for empty queries — FTS5 rejects empty strings
+        if request.query.trim().is_empty() {
+            return Ok(RetrievalResult {
+                memories: vec![],
+                ghost_activations: vec![],
+                total_nodes_activated: 0,
+            });
+        }
+
         // Phase 1: Seed — find directly matching nodes via FTS
         let seed_matches = self
             .db
@@ -31,7 +40,7 @@ impl<'a> ActivationEngine<'a> {
         // Build ghost activations map with same normalization as impulse matches
         let mut ghost_activations_map: HashMap<String, f64> = HashMap::new();
         for (id, rank) in &ghost_matches {
-            let score = (-rank).min(1.0).max(0.1);
+            let score = (-rank).clamp(0.1, 1.0);
             ghost_activations_map.insert(id.clone(), score);
         }
 
@@ -51,7 +60,7 @@ impl<'a> ActivationEngine<'a> {
         for (id, rank) in &seed_matches {
             // FTS5 rank is negative, more negative = better match
             // Normalize: use absolute value, then scale
-            let score = (-rank).min(1.0).max(0.1);
+            let score = (-rank).clamp(0.1, 1.0);
             activations.insert(id.clone(), score);
             activation_paths.insert(id.clone(), vec![id.clone()]);
         }
