@@ -1,12 +1,15 @@
 // MCP tool handlers
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::activation::ActivationEngine;
 use crate::db::Database;
 use crate::ingestion;
 use crate::models::*;
 use crate::session::Session;
+
+use rmcp::model::{ServerCapabilities, ServerInfo};
+use rmcp::{ServerHandler, schemars, tool};
 
 pub struct MemoryGraphServer {
     db: Mutex<Database>,
@@ -264,5 +267,204 @@ impl MemoryGraphServer {
 
         serde_json::to_string_pretty(&candidates)
             .map_err(|e| format!("Serialization error: {}", e))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MCP transport wrapper
+// ---------------------------------------------------------------------------
+
+/// Wraps MemoryGraphServer in an Arc so it satisfies the Clone + Send + Sync
+/// bounds required by rmcp's ServerHandler trait.
+#[derive(Clone)]
+pub struct McpHandler {
+    inner: Arc<MemoryGraphServer>,
+}
+
+impl McpHandler {
+    pub fn new(server: MemoryGraphServer) -> Self {
+        Self {
+            inner: Arc::new(server),
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SaveMemoryParams {
+    /// The content/text of the memory to save.
+    pub content: String,
+    /// The type of impulse: "explicit", "inferred", "environmental", or "episodic".
+    pub impulse_type: String,
+    /// Optional emotional valence: "positive", "negative", or "neutral".
+    #[schemars(default)]
+    pub emotional_valence: Option<String>,
+    /// Optional engagement level: "high", "medium", or "low".
+    #[schemars(default)]
+    pub engagement_level: Option<String>,
+    /// Optional source reference string.
+    #[schemars(default)]
+    pub source_ref: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RetrieveContextParams {
+    /// The query string to search memories.
+    pub query: String,
+    /// Maximum number of results to return (default 10).
+    #[schemars(default)]
+    pub max_results: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DeleteMemoryParams {
+    /// The ID of the memory to delete.
+    pub id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UpdateMemoryParams {
+    /// The ID of the memory to update.
+    pub id: String,
+    /// The new content for the memory.
+    pub new_content: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct InspectMemoryParams {
+    /// The ID of the memory to inspect.
+    pub id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SetIncognitoParams {
+    /// Whether to enable or disable incognito mode.
+    pub enabled: bool,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ExplainRecallParams {
+    /// The query that triggered recall.
+    pub query: String,
+    /// The memory ID to explain.
+    pub memory_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ConfirmProposalParams {
+    /// The ID of the candidate memory to confirm.
+    pub id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DismissProposalParams {
+    /// The ID of the candidate memory to dismiss.
+    pub id: String,
+}
+
+#[tool(tool_box)]
+impl McpHandler {
+    #[tool(description = "Save a new memory to the graph")]
+    fn save_memory(
+        &self,
+        #[tool(aggr)] params: SaveMemoryParams,
+    ) -> Result<String, String> {
+        self.inner.handle_save_memory(
+            params.content,
+            params.impulse_type,
+            params.emotional_valence,
+            params.engagement_level,
+            params.source_ref,
+        )
+    }
+
+    #[tool(description = "Retrieve context-relevant memories for a query")]
+    fn retrieve_context(
+        &self,
+        #[tool(aggr)] params: RetrieveContextParams,
+    ) -> Result<String, String> {
+        self.inner
+            .handle_retrieve_context(params.query, params.max_results)
+    }
+
+    #[tool(description = "Soft-delete a memory by ID")]
+    fn delete_memory(
+        &self,
+        #[tool(aggr)] params: DeleteMemoryParams,
+    ) -> Result<String, String> {
+        self.inner.handle_delete_memory(params.id)
+    }
+
+    #[tool(description = "Update the content of an existing memory")]
+    fn update_memory(
+        &self,
+        #[tool(aggr)] params: UpdateMemoryParams,
+    ) -> Result<String, String> {
+        self.inner
+            .handle_update_memory(params.id, params.new_content)
+    }
+
+    #[tool(description = "Inspect a memory and its connections")]
+    fn inspect_memory(
+        &self,
+        #[tool(aggr)] params: InspectMemoryParams,
+    ) -> Result<String, String> {
+        self.inner.handle_inspect_memory(params.id)
+    }
+
+    #[tool(description = "Get memory graph status and statistics")]
+    fn memory_status(&self) -> Result<String, String> {
+        self.inner.handle_memory_status()
+    }
+
+    #[tool(description = "Enable or disable incognito mode")]
+    fn set_incognito(
+        &self,
+        #[tool(aggr)] params: SetIncognitoParams,
+    ) -> Result<String, String> {
+        self.inner.handle_set_incognito(params.enabled)
+    }
+
+    #[tool(description = "Explain why a memory was recalled for a given query")]
+    fn explain_recall(
+        &self,
+        #[tool(aggr)] params: ExplainRecallParams,
+    ) -> Result<String, String> {
+        self.inner
+            .handle_explain_recall(params.query, params.memory_id)
+    }
+
+    #[tool(description = "Confirm a candidate memory proposal")]
+    fn confirm_proposal(
+        &self,
+        #[tool(aggr)] params: ConfirmProposalParams,
+    ) -> Result<String, String> {
+        self.inner.handle_confirm_proposal(params.id)
+    }
+
+    #[tool(description = "Dismiss a candidate memory proposal")]
+    fn dismiss_proposal(
+        &self,
+        #[tool(aggr)] params: DismissProposalParams,
+    ) -> Result<String, String> {
+        self.inner.handle_dismiss_proposal(params.id)
+    }
+
+    #[tool(description = "List all candidate memory proposals")]
+    fn list_candidates(&self) -> Result<String, String> {
+        self.inner.handle_list_candidates()
+    }
+}
+
+#[tool(tool_box)]
+impl ServerHandler for McpHandler {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo {
+            instructions: Some(
+                "memory-graph: a portable, human-memory-inspired memory layer for AI systems"
+                    .into(),
+            ),
+            capabilities: ServerCapabilities::builder().enable_tools().build(),
+            ..Default::default()
+        }
     }
 }
