@@ -577,7 +577,7 @@ impl Database {
                 now_str,
                 input.source_type.as_str(),
                 input.source_ref,
-                "confirmed",
+                "candidate",
             ],
         )?;
 
@@ -608,6 +608,18 @@ impl Database {
             params![status.as_str(), id],
         )?;
         Ok(())
+    }
+
+    pub fn confirm_impulse(&self, id: &str) -> SqlResult<()> {
+        self.update_impulse_status(id, ImpulseStatus::Confirmed)
+    }
+
+    pub fn dismiss_impulse(&self, id: &str) -> SqlResult<()> {
+        self.update_impulse_status(id, ImpulseStatus::Deleted)
+    }
+
+    pub fn list_candidates(&self) -> SqlResult<Vec<Impulse>> {
+        self.list_impulses(Some(ImpulseStatus::Candidate))
     }
 
     pub fn update_impulse_content(&self, id: &str, content: &str) -> SqlResult<String> {
@@ -688,7 +700,7 @@ impl Database {
              FROM impulses_fts fts
              JOIN impulses i ON i.rowid = fts.rowid
              WHERE impulses_fts MATCH ?1
-             AND i.status IN ('confirmed', 'candidate')
+             AND i.status = 'confirmed'
              ORDER BY fts.rank",
         )?;
         let rows = stmt.query_map(params![query], |row| {
@@ -923,7 +935,12 @@ fn test_insert_and_get_impulse() {
     let impulse = db.insert_impulse(&input).unwrap();
     assert_eq!(impulse.content, input.content);
     assert_eq!(impulse.weight, WEIGHT_EXPLICIT_SAVE);
-    assert_eq!(impulse.status, ImpulseStatus::Confirmed);
+    assert_eq!(impulse.status, ImpulseStatus::Candidate);
+
+    // Confirm it
+    db.confirm_impulse(&impulse.id).unwrap();
+    let confirmed = db.get_impulse(&impulse.id).unwrap();
+    assert_eq!(confirmed.status, ImpulseStatus::Confirmed);
 
     let retrieved = db.get_impulse(&impulse.id).unwrap();
     assert_eq!(retrieved.id, impulse.id);
@@ -1265,6 +1282,7 @@ use memory_graph::models::*;
 
 fn seed_graph(db: &memory_graph::db::Database) -> (String, String, String) {
     // Create three connected impulses: A -> B -> C
+    // All confirmed so they appear in FTS search
     let a = db
         .insert_impulse(&NewImpulse {
             content: "Rust is great for building memory systems".to_string(),
@@ -1277,6 +1295,7 @@ fn seed_graph(db: &memory_graph::db::Database) -> (String, String, String) {
             source_ref: "test".to_string(),
         })
         .unwrap();
+    db.confirm_impulse(&a.id).unwrap();
 
     let b = db
         .insert_impulse(&NewImpulse {
@@ -1290,6 +1309,7 @@ fn seed_graph(db: &memory_graph::db::Database) -> (String, String, String) {
             source_ref: "test".to_string(),
         })
         .unwrap();
+    db.confirm_impulse(&b.id).unwrap();
 
     let c = db
         .insert_impulse(&NewImpulse {
@@ -1303,6 +1323,7 @@ fn seed_graph(db: &memory_graph::db::Database) -> (String, String, String) {
             source_ref: "test".to_string(),
         })
         .unwrap();
+    db.confirm_impulse(&c.id).unwrap();
 
     // A relates_to B, B relates_to C
     db.insert_connection(&NewConnection {
@@ -1468,6 +1489,7 @@ fn test_high_engagement_amplifies_propagation() {
             source_ref: "test".to_string(),
         })
         .unwrap();
+    db.confirm_impulse(&a.id).unwrap();
 
     let b_high = db
         .insert_impulse(&NewImpulse {
@@ -1481,6 +1503,7 @@ fn test_high_engagement_amplifies_propagation() {
             source_ref: "test".to_string(),
         })
         .unwrap();
+    db.confirm_impulse(&b_high.id).unwrap();
 
     let b_low = db
         .insert_impulse(&NewImpulse {
@@ -1494,6 +1517,7 @@ fn test_high_engagement_amplifies_propagation() {
             source_ref: "test".to_string(),
         })
         .unwrap();
+    db.confirm_impulse(&b_low.id).unwrap();
 
     // Same connection weight for both
     db.insert_connection(&NewConnection {
@@ -2012,6 +2036,22 @@ fn test_explicit_save_creates_impulse() {
         "Auth middleware drops tokens under concurrent writes"
     );
     assert_eq!(impulse.weight, WEIGHT_EXPLICIT_SAVE);
+    assert_eq!(impulse.status, ImpulseStatus::Candidate);
+}
+
+#[test]
+fn test_save_and_confirm_creates_confirmed_impulse() {
+    let db = common::test_db();
+    let impulse = ingestion::save_and_confirm(
+        &db,
+        "Confirmed memory",
+        ImpulseType::Heuristic,
+        EmotionalValence::Neutral,
+        EngagementLevel::Medium,
+        vec![],
+        "session-001",
+    ).unwrap();
+
     assert_eq!(impulse.status, ImpulseStatus::Confirmed);
 }
 
@@ -2178,6 +2218,48 @@ pub fn explicit_save_with_connections(
 
     Ok(impulse)
 }
+
+/// Convenience: save and immediately confirm. Used when the save is already
+/// user-initiated and no separate review step is needed (e.g., in tests,
+/// or when the caller has already obtained confirmation).
+pub fn save_and_confirm(
+    db: &Database,
+    content: &str,
+    impulse_type: ImpulseType,
+    emotional_valence: EmotionalValence,
+    engagement_level: EngagementLevel,
+    source_signals: Vec<String>,
+    source_ref: &str,
+) -> Result<Impulse, String> {
+    let impulse = explicit_save(
+        db, content, impulse_type, emotional_valence, engagement_level,
+        source_signals, source_ref,
+    )?;
+    db.confirm_impulse(&impulse.id)
+        .map_err(|e| format!("Failed to confirm: {}", e))?;
+    db.get_impulse(&impulse.id)
+        .map_err(|e| format!("Failed to retrieve confirmed impulse: {}", e))
+}
+
+pub fn save_and_confirm_with_connections(
+    db: &Database,
+    content: &str,
+    impulse_type: ImpulseType,
+    emotional_valence: EmotionalValence,
+    engagement_level: EngagementLevel,
+    source_signals: Vec<String>,
+    source_ref: &str,
+    connections: &[(String, String, f64)],
+) -> Result<Impulse, String> {
+    let impulse = explicit_save_with_connections(
+        db, content, impulse_type, emotional_valence, engagement_level,
+        source_signals, source_ref, connections,
+    )?;
+    db.confirm_impulse(&impulse.id)
+        .map_err(|e| format!("Failed to confirm: {}", e))?;
+    db.get_impulse(&impulse.id)
+        .map_err(|e| format!("Failed to retrieve confirmed impulse: {}", e))
+}
 ```
 
 - [ ] **Step 4: Run tests**
@@ -2189,7 +2271,7 @@ Expected: All ingestion tests PASS
 
 ```bash
 git add src/ingestion.rs tests/test_ingestion.rs
-git commit -m "feat: implement ingestion pipeline with redaction and connection support"
+git commit -m "feat: implement ingestion pipeline with candidate model and save_and_confirm helper"
 ```
 
 ---
@@ -2708,6 +2790,43 @@ impl MemoryGraphServer {
         serde_json::to_string_pretty(&explanation)
             .map_err(|e| format!("Serialization error: {}", e))
     }
+
+    pub fn handle_confirm_proposal(&self, id: String) -> Result<String, String> {
+        if self.is_incognito() {
+            return Err("Cannot confirm memory in incognito mode".to_string());
+        }
+
+        let db = self.db.lock().unwrap();
+        db.confirm_impulse(&id)
+            .map_err(|e| format!("Confirm failed: {}", e))?;
+
+        let impulse = db.get_impulse(&id)
+            .map_err(|e| format!("Fetch failed: {}", e))?;
+
+        serde_json::to_string_pretty(&impulse)
+            .map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_dismiss_proposal(&self, id: String) -> Result<String, String> {
+        if self.is_incognito() {
+            return Err("Cannot dismiss memory in incognito mode".to_string());
+        }
+
+        let db = self.db.lock().unwrap();
+        db.dismiss_impulse(&id)
+            .map_err(|e| format!("Dismiss failed: {}", e))?;
+
+        Ok(format!("{{\"dismissed\": \"{}\"}}", id))
+    }
+
+    pub fn handle_list_candidates(&self) -> Result<String, String> {
+        let db = self.db.lock().unwrap();
+        let candidates = db.list_candidates()
+            .map_err(|e| format!("List failed: {}", e))?;
+
+        serde_json::to_string_pretty(&candidates)
+            .map_err(|e| format!("Serialization error: {}", e))
+    }
 }
 ```
 
@@ -2824,7 +2943,7 @@ fn validation_store_retrieve_round_trip() {
     let db = common::test_db();
 
     // Save 5 impulses on different topics
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "Rust ownership model prevents data races at compile time",
         ImpulseType::Heuristic,
@@ -2835,7 +2954,7 @@ fn validation_store_retrieve_round_trip() {
     )
     .unwrap();
 
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "PostgreSQL handles concurrent writes better than SQLite",
         ImpulseType::Heuristic,
@@ -2846,7 +2965,7 @@ fn validation_store_retrieve_round_trip() {
     )
     .unwrap();
 
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "React hooks should not be called conditionally",
         ImpulseType::Pattern,
@@ -2857,7 +2976,7 @@ fn validation_store_retrieve_round_trip() {
     )
     .unwrap();
 
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "Memory decay follows exponential curves in cognitive science",
         ImpulseType::Heuristic,
@@ -2868,7 +2987,7 @@ fn validation_store_retrieve_round_trip() {
     )
     .unwrap();
 
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "Kubernetes pod scheduling uses resource requests and limits",
         ImpulseType::Observation,
@@ -2930,7 +3049,7 @@ fn validation_store_retrieve_round_trip() {
 fn validation_spreading_activation_through_adjacency() {
     let db = common::test_db();
 
-    let auth = ingestion::explicit_save(
+    let auth = ingestion::save_and_confirm(
         &db,
         "JWT tokens should have short expiration times",
         ImpulseType::Heuristic,
@@ -2941,7 +3060,7 @@ fn validation_spreading_activation_through_adjacency() {
     )
     .unwrap();
 
-    let security = ingestion::explicit_save_with_connections(
+    let security = ingestion::save_and_confirm_with_connections(
         &db,
         "Session fixation attacks can bypass authentication",
         ImpulseType::Pattern,
@@ -2953,7 +3072,7 @@ fn validation_spreading_activation_through_adjacency() {
     )
     .unwrap();
 
-    let mitigation = ingestion::explicit_save_with_connections(
+    let mitigation = ingestion::save_and_confirm_with_connections(
         &db,
         "Regenerate session IDs after privilege escalation",
         ImpulseType::Decision,
@@ -3048,7 +3167,7 @@ fn validation_narrative_reconstruction_from_connections() {
     let db = common::test_db();
 
     // Create a cluster of connected impulses about a design decision
-    let problem = ingestion::explicit_save(
+    let problem = ingestion::save_and_confirm(
         &db,
         "AI memory systems lose context when switching providers",
         ImpulseType::Observation,
@@ -3059,7 +3178,7 @@ fn validation_narrative_reconstruction_from_connections() {
     )
     .unwrap();
 
-    let insight = ingestion::explicit_save_with_connections(
+    let insight = ingestion::save_and_confirm_with_connections(
         &db,
         "Memory should be portable and user-owned, not provider-locked",
         ImpulseType::Heuristic,
@@ -3071,7 +3190,7 @@ fn validation_narrative_reconstruction_from_connections() {
     )
     .unwrap();
 
-    let decision = ingestion::explicit_save_with_connections(
+    let decision = ingestion::save_and_confirm_with_connections(
         &db,
         "Build memory as an MCP server so any client can use it",
         ImpulseType::Decision,
@@ -3083,7 +3202,7 @@ fn validation_narrative_reconstruction_from_connections() {
     )
     .unwrap();
 
-    let implementation = ingestion::explicit_save_with_connections(
+    let implementation = ingestion::save_and_confirm_with_connections(
         &db,
         "Use SQLite for portable local-first storage",
         ImpulseType::Decision,
@@ -3130,7 +3249,7 @@ fn validation_emotional_weighting() {
     let db = common::test_db();
 
     // Two impulses about similar topics, different engagement
-    let high = ingestion::explicit_save(
+    let high = ingestion::save_and_confirm(
         &db,
         "Graph databases enable powerful relationship traversal queries",
         ImpulseType::Heuristic,
@@ -3141,7 +3260,7 @@ fn validation_emotional_weighting() {
     )
     .unwrap();
 
-    let low = ingestion::explicit_save(
+    let low = ingestion::save_and_confirm(
         &db,
         "Graph models store relationships between entities",
         ImpulseType::Observation,
@@ -3153,7 +3272,7 @@ fn validation_emotional_weighting() {
     .unwrap();
 
     // Connect both to a shared concept
-    let anchor = ingestion::explicit_save(
+    let anchor = ingestion::save_and_confirm(
         &db,
         "Graph data structures for memory systems",
         ImpulseType::Pattern,
@@ -3217,7 +3336,7 @@ fn validation_emotional_weighting() {
 fn validation_security_secrets_stripped() {
     let db = common::test_db();
 
-    let impulse = ingestion::explicit_save(
+    let impulse = ingestion::save_and_confirm(
         &db,
         "Connect with AKIAIOSFODNN7EXAMPLE and secret key wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         ImpulseType::Observation,
@@ -3239,7 +3358,7 @@ fn validation_security_secrets_stripped() {
 fn validation_security_bearer_tokens_stripped() {
     let db = common::test_db();
 
-    let impulse = ingestion::explicit_save(
+    let impulse = ingestion::save_and_confirm(
         &db,
         "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.something",
         ImpulseType::Observation,
@@ -3257,7 +3376,7 @@ fn validation_security_bearer_tokens_stripped() {
 fn validation_security_connection_strings_stripped() {
     let db = common::test_db();
 
-    let impulse = ingestion::explicit_save(
+    let impulse = ingestion::save_and_confirm(
         &db,
         "Set DATABASE_URL=postgresql://admin:supersecret@prod.db.example.com:5432/maindb",
         ImpulseType::Observation,
@@ -3491,6 +3610,27 @@ impl McpHandler {
     ) -> Result<String, String> {
         self.inner.handle_explain_recall(query, memory_id)
     }
+
+    #[tool(description = "Confirm a candidate memory, promoting it to confirmed status so it appears in retrieval")]
+    fn confirm_proposal(
+        &self,
+        #[tool(param, description = "ID of the candidate memory to confirm")] id: String,
+    ) -> Result<String, String> {
+        self.inner.handle_confirm_proposal(id)
+    }
+
+    #[tool(description = "Dismiss a candidate memory (soft delete — will not appear in retrieval)")]
+    fn dismiss_proposal(
+        &self,
+        #[tool(param, description = "ID of the candidate memory to dismiss")] id: String,
+    ) -> Result<String, String> {
+        self.inner.handle_dismiss_proposal(id)
+    }
+
+    #[tool(description = "List all candidate (unconfirmed) memories awaiting review")]
+    fn list_candidates(&self) -> Result<String, String> {
+        self.inner.handle_list_candidates()
+    }
 }
 
 impl rmcp::ServerHandler for McpHandler {
@@ -3636,12 +3776,13 @@ After completing all tasks, the following should be true:
 1. `cargo test` passes all tests including the 8 PRD validation tests
 2. `cargo build --release` produces a working binary
 3. The binary starts an MCP server on stdio when run
-4. All 7 MCP tools are registered and functional: save_memory, retrieve_context, delete_memory, update_memory, inspect_memory, memory_status, set_incognito, explain_recall
+4. All 11 MCP tools are registered and functional: save_memory, retrieve_context, delete_memory, update_memory, inspect_memory, memory_status, set_incognito, explain_recall, confirm_proposal, dismiss_proposal, list_candidates
 
 **What is NOT included in Phase 1 (deferred to Phase 2+):**
 - Ghost graph registration and pull-through
 - End-of-session adaptive extraction (requires LLM call)
 - `recall_narrative` tool (requires LLM for narrative reconstruction)
-- `propose_memories` / `confirm_proposal` / `dismiss_proposal` tools
+- `propose_memories` tool (end-of-session extraction, Phase 2)
+- Permanent ghost pull-through with LLM extraction (Phase 2 — session-only pull is Phase 2, permanent requires extraction)
 - Visual graph inspection
 - Cross-device sync

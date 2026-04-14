@@ -1052,7 +1052,17 @@ fn test_pull_through_permanent_creates_impulse() {
     assert!(!content.is_empty());
 
     let after_count = db.impulse_count().unwrap();
-    assert!(after_count > before_count);
+    assert!(after_count > before_count, "Permanent pull should extract impulses from content");
+
+    // Impulses should be extracted (not raw file copy) and confirmed
+    let impulses = db.list_impulses(Some(ImpulseStatus::Confirmed)).unwrap();
+    let pulled: Vec<_> = impulses.iter().filter(|i| i.source_type == SourceType::PullThrough).collect();
+    assert!(!pulled.is_empty());
+    // Each extracted impulse should be shorter than the full file
+    for imp in &pulled {
+        assert!(imp.content.len() < content.len() || pulled.len() == 1,
+            "Extracted impulses should be sections, not full file copies");
+    }
 }
 
 #[test]
@@ -1142,23 +1152,66 @@ pub fn pull_ghost_content(
         .map_err(|e| format!("Failed to touch ghost node: {}", e))?;
 
     if mode == PullMode::Permanent {
-        // Create an impulse from the pulled content
-        let input = NewImpulse {
-            content: content.clone(),
-            impulse_type: ImpulseType::Observation,
-            initial_weight: WEIGHT_PULL_THROUGH,
-            emotional_valence: EmotionalValence::Neutral,
-            engagement_level: EngagementLevel::Medium,
-            source_signals: vec![format!("ghost_pull:{}", ghost_node.source_graph)],
-            source_type: SourceType::PullThrough,
-            source_ref: format!("{}:{}", ghost_node.source_graph, ghost_node.external_ref),
-        };
+        // Extract impulses from the content rather than storing raw file.
+        // For now, use a simple heuristic: split on headings/paragraphs and
+        // create one impulse per meaningful section. In production this would
+        // be an LLM extraction call.
+        let extracted = extract_impulses_from_content(&content);
 
-        db.insert_impulse(&input)
-            .map_err(|e| format!("Failed to create impulse from pull: {}", e))?;
+        for extracted_content in &extracted {
+            // Redact before persisting
+            let redacted = crate::redaction::redact(extracted_content);
+
+            let input = NewImpulse {
+                content: redacted.clean_content,
+                impulse_type: ImpulseType::Observation,
+                initial_weight: WEIGHT_PULL_THROUGH,
+                emotional_valence: EmotionalValence::Neutral,
+                engagement_level: EngagementLevel::Medium,
+                source_signals: vec![format!("ghost_pull:{}", ghost_node.source_graph)],
+                source_type: SourceType::PullThrough,
+                source_ref: format!("{}:{}", ghost_node.source_graph, ghost_node.external_ref),
+            };
+
+            let impulse = db.insert_impulse(&input)
+                .map_err(|e| format!("Failed to create impulse from pull: {}", e))?;
+            db.confirm_impulse(&impulse.id)
+                .map_err(|e| format!("Failed to confirm: {}", e))?;
+        }
     }
 
     Ok(content)
+}
+
+/// Simple extraction: split content into meaningful sections by headings.
+/// Each non-empty section becomes a candidate impulse.
+/// In production, this would be an LLM call to extract impulses/insights.
+fn extract_impulses_from_content(content: &str) -> Vec<String> {
+    let mut sections = Vec::new();
+    let mut current = String::new();
+
+    for line in content.lines() {
+        if line.starts_with('#') && !current.trim().is_empty() {
+            let trimmed = current.trim().to_string();
+            if trimmed.len() > 10 {
+                sections.push(trimmed);
+            }
+            current = line.to_string() + "\n";
+        } else {
+            current.push_str(line);
+            current.push('\n');
+        }
+    }
+
+    if !current.trim().is_empty() && current.trim().len() > 10 {
+        sections.push(current.trim().to_string());
+    }
+
+    if sections.is_empty() && content.trim().len() > 10 {
+        sections.push(content.trim().to_string());
+    }
+
+    sections
 }
 ```
 
@@ -1216,7 +1269,7 @@ fn test_activation_includes_ghost_nodes() {
     ghost::register_and_scan(&db, "test-vault", vault.path().to_str().unwrap(), "obsidian", &config).unwrap();
 
     // Also add a regular impulse about Rust
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "Rust is great for building memory systems",
         ImpulseType::Heuristic,
@@ -1854,7 +1907,7 @@ fn validation_p2_pull_through_on_query() {
     ).unwrap();
 
     // Add a related impulse to the memory graph
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "Memory systems should be portable across providers",
         ImpulseType::Heuristic,
@@ -2031,7 +2084,7 @@ fn validation_p2_integrated_retrieval() {
     ghost::register_and_scan(&db, "v-vault", vault.path().to_str().unwrap(), "obsidian", &config).unwrap();
 
     // Add memory graph impulses
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "Spreading activation mimics human memory recall patterns",
         ImpulseType::Heuristic,
@@ -2041,7 +2094,7 @@ fn validation_p2_integrated_retrieval() {
         "test",
     ).unwrap();
 
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "SQLite is excellent for portable local-first storage",
         ImpulseType::Decision,

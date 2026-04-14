@@ -191,7 +191,7 @@ fn test_activation_with_empty_graph() {
 #[test]
 fn test_activation_with_single_node() {
     let db = common::test_db();
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db, "Single isolated node",
         ImpulseType::Observation, EmotionalValence::Neutral,
         EngagementLevel::Medium, vec![], "test",
@@ -211,12 +211,12 @@ fn test_activation_with_disconnected_clusters() {
     let db = common::test_db();
 
     // Cluster 1: A -> B
-    let a = ingestion::explicit_save(
+    let a = ingestion::save_and_confirm(
         &db, "Rust ownership patterns",
         ImpulseType::Heuristic, EmotionalValence::Positive,
         EngagementLevel::High, vec![], "test",
     ).unwrap();
-    ingestion::explicit_save_with_connections(
+    ingestion::save_and_confirm_with_connections(
         &db, "Borrow checker prevents data races",
         ImpulseType::Pattern, EmotionalValence::Positive,
         EngagementLevel::Medium, vec![], "test",
@@ -224,12 +224,12 @@ fn test_activation_with_disconnected_clusters() {
     ).unwrap();
 
     // Cluster 2: C -> D (disconnected from cluster 1)
-    let c = ingestion::explicit_save(
+    let c = ingestion::save_and_confirm(
         &db, "PostgreSQL connection pooling",
         ImpulseType::Heuristic, EmotionalValence::Neutral,
         EngagementLevel::Medium, vec![], "test",
     ).unwrap();
-    ingestion::explicit_save_with_connections(
+    ingestion::save_and_confirm_with_connections(
         &db, "Database connections are expensive to create",
         ImpulseType::Pattern, EmotionalValence::Neutral,
         EngagementLevel::Low, vec![], "test",
@@ -256,7 +256,7 @@ fn test_activation_at_scale_100_nodes() {
 
     // Create 100 impulses
     for i in 0..100 {
-        let impulse = ingestion::explicit_save(
+        let impulse = ingestion::save_and_confirm(
             &db,
             &format!("Memory node {} about topic {}", i, i % 10),
             ImpulseType::Observation,
@@ -300,7 +300,7 @@ fn test_activation_at_scale_1000_nodes() {
     let mut ids = Vec::new();
 
     for i in 0..1000 {
-        let impulse = ingestion::explicit_save(
+        let impulse = ingestion::save_and_confirm(
             &db,
             &format!("Scale test node {} category {}", i, i % 50),
             ImpulseType::Observation,
@@ -345,15 +345,15 @@ fn test_activation_with_cycle() {
     let db = common::test_db();
 
     // A -> B -> C -> A (cycle)
-    let a = ingestion::explicit_save(
+    let a = ingestion::save_and_confirm(
         &db, "Cycle node A", ImpulseType::Observation,
         EmotionalValence::Neutral, EngagementLevel::Medium, vec![], "test",
     ).unwrap();
-    let b = ingestion::explicit_save(
+    let b = ingestion::save_and_confirm(
         &db, "Cycle node B", ImpulseType::Observation,
         EmotionalValence::Neutral, EngagementLevel::Medium, vec![], "test",
     ).unwrap();
-    let c = ingestion::explicit_save(
+    let c = ingestion::save_and_confirm(
         &db, "Cycle node C", ImpulseType::Observation,
         EmotionalValence::Neutral, EngagementLevel::Medium, vec![], "test",
     ).unwrap();
@@ -389,7 +389,7 @@ fn test_activation_with_cycle() {
 #[test]
 fn test_activation_max_results_zero() {
     let db = common::test_db();
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db, "Some memory", ImpulseType::Observation,
         EmotionalValence::Neutral, EngagementLevel::Medium, vec![], "test",
     ).unwrap();
@@ -407,7 +407,7 @@ fn test_activation_max_results_zero() {
 #[test]
 fn test_activation_empty_query() {
     let db = common::test_db();
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db, "Memory", ImpulseType::Observation,
         EmotionalValence::Neutral, EngagementLevel::Medium, vec![], "test",
     ).unwrap();

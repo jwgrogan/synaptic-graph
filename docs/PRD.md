@@ -107,11 +107,13 @@ The user's existing knowledge ecosystem stays intact. memory-graph sits alongsid
 - Implement spreading activation retrieval
 - Implement decay and reinforcement mechanics
 - Implement ingestion pipeline with extraction and secret stripping
+- Implement candidate-confirmation workflow (save creates candidate, user confirms/dismisses)
 - Implement incognito mode
-- MCP tool surface for basic memory operations
+- MCP tool surface for basic memory operations including confirm_proposal and dismiss_proposal
 
 **Validation criteria:**
 - Store/retrieve round-trip: save impulses, retrieve by related query, correct ones return
+- Candidate gate: explicit saves create candidates, only confirmed impulses appear in retrieval
 - Spreading activation: connected impulses activate through adjacency
 - Decay: accessed memories surface more strongly than untouched ones after time
 - Reconstruction: system builds coherent narrative from connected impulses without stored summary
@@ -131,9 +133,9 @@ The user's existing knowledge ecosystem stays intact. memory-graph sits alongsid
 **Validation criteria:**
 - Ghost graph maps Obsidian vault topology without content ingestion
 - Pull-through activates on relevant query, fetches content on demand
-- Session-only pulls leave no persistent trace
-- Permanent pulls create full memory nodes with provenance
-- MCP tools work in at least two different AI clients
+- Session-only pulls leave no persistent content trace (ghost node access weights are still updated to learn relevance)
+- Permanent pulls extract impulses from content (not raw file copy), with redaction, and create memory nodes with provenance
+- MCP tools work in at least two different AI clients (manual validation with real MCP handshake)
 - Adaptive extraction proposes more from engaging sessions, less from routine ones
 
 **Kill criterion:** If users don't find surfaced context useful enough to keep the MCP loaded, retrieval or extraction quality isn't there.
@@ -142,7 +144,7 @@ The user's existing knowledge ecosystem stays intact. memory-graph sits alongsid
 
 ### Phase 3: Sync and Portability
 - Backup and cross-device portability
-- Identity and sync semantics
+- Identity and sync semantics with ID-based merge (not overwrite)
 - Multiple ghost graph sources (Obsidian + repos + conversations)
 - Optional cloud sync without compromising local-first guarantees
 

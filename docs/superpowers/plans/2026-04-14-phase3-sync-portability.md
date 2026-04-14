@@ -100,7 +100,7 @@ fn test_backup_creates_file() {
     let backup_path = tmp.path().join("backup.db");
 
     let db = Database::open(db_path.to_str().unwrap()).unwrap();
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "Test memory for backup",
         ImpulseType::Observation,
@@ -121,7 +121,7 @@ fn test_backup_includes_checksum() {
     let backup_path = tmp.path().join("backup.db");
 
     let db = Database::open(db_path.to_str().unwrap()).unwrap();
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "Test memory",
         ImpulseType::Observation,
@@ -143,7 +143,7 @@ fn test_verify_backup_integrity() {
     let backup_path = tmp.path().join("backup.db");
 
     let db = Database::open(db_path.to_str().unwrap()).unwrap();
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "Important memory",
         ImpulseType::Heuristic,
@@ -165,7 +165,7 @@ fn test_corrupted_backup_fails_verification() {
     let backup_path = tmp.path().join("backup.db");
 
     let db = Database::open(db_path.to_str().unwrap()).unwrap();
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "Memory",
         ImpulseType::Observation,
@@ -193,7 +193,7 @@ fn test_restore_from_backup() {
 
     // Create original with data
     let db = Database::open(db_path.to_str().unwrap()).unwrap();
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db,
         "Memory that should survive restore",
         ImpulseType::Heuristic,
@@ -230,13 +230,13 @@ fn test_restore_preserves_connections() {
 
     let db = Database::open(db_path.to_str().unwrap()).unwrap();
 
-    let a = ingestion::explicit_save(
+    let a = ingestion::save_and_confirm(
         &db, "Node A", ImpulseType::Observation,
         EmotionalValence::Neutral, EngagementLevel::Medium,
         vec![], "test",
     ).unwrap();
 
-    let b = ingestion::explicit_save_with_connections(
+    let b = ingestion::save_and_confirm_with_connections(
         &db, "Node B", ImpulseType::Observation,
         EmotionalValence::Neutral, EngagementLevel::Medium,
         vec![], "test",
@@ -401,7 +401,7 @@ git commit -m "feat: implement backup/restore with SHA-256 integrity verificatio
 - Modify: `src/sync.rs`
 - Create: `tests/test_sync.rs`
 
-The sync model is simple: the user points to a shared directory (iCloud, Dropbox, NAS mount). The system writes snapshots there and detects when a newer snapshot exists from another device.
+The sync model uses a shared directory (iCloud, Dropbox, NAS mount) for snapshot exchange. Import uses ID-based merge (newer-wins) instead of overwrite, preserving local records not in the remote snapshot. This requires adding `insert_impulse_with_id` to the Database (same as `insert_impulse` but with a caller-specified ID instead of generating a new UUID).
 
 - [ ] **Step 1: Write failing tests**
 
@@ -424,7 +424,7 @@ fn test_sync_export_creates_snapshot() {
     std::fs::create_dir(&sync_dir).unwrap();
 
     let db = Database::open(db_path.to_str().unwrap()).unwrap();
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db, "Sync test memory", ImpulseType::Observation,
         EmotionalValence::Neutral, EngagementLevel::Medium,
         vec![], "test",
@@ -446,7 +446,7 @@ fn test_sync_detects_newer_remote_snapshot() {
 
     // Device A exports
     let db_a = Database::open(db_a_path.to_str().unwrap()).unwrap();
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db_a, "From device A", ImpulseType::Observation,
         EmotionalValence::Neutral, EngagementLevel::Medium,
         vec![], "test",
@@ -470,19 +470,22 @@ fn test_sync_import_remote_snapshot() {
 
     // Device A creates data and exports
     let db_a = Database::open(db_a_path.to_str().unwrap()).unwrap();
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db_a, "Memory from device A", ImpulseType::Heuristic,
         EmotionalValence::Positive, EngagementLevel::High,
         vec![], "test",
     ).unwrap();
     let export = sync::export_snapshot(&db_a, sync_dir.to_str().unwrap(), "device-a").unwrap();
 
-    // Device B imports
-    sync::import_snapshot(
+    // Device B imports (merge, not overwrite)
+    let merge_result = sync::import_snapshot(
         &export.snapshot_path,
         db_b_path.to_str().unwrap(),
         &export.checksum,
     ).unwrap();
+
+    assert_eq!(merge_result.inserted, 1);
+    assert_eq!(merge_result.skipped, 0);
 
     let db_b = Database::open(db_b_path.to_str().unwrap()).unwrap();
     let impulses = db_b.list_impulses(None).unwrap();
@@ -616,12 +619,84 @@ pub fn check_sync_status(
     })
 }
 
+/// Import remote snapshot by merging records into the local database.
+/// Uses ID-based merge: new records are inserted, existing records use
+/// newer-wins based on last_accessed_at. Local records not in the remote
+/// snapshot are preserved (no data loss).
 pub fn import_snapshot(
     snapshot_path: &str,
     local_db_path: &str,
     expected_checksum: &str,
-) -> Result<(), String> {
-    backup::restore_backup(snapshot_path, local_db_path, expected_checksum)
+) -> Result<SyncMergeResult, String> {
+    // Verify integrity
+    if !backup::verify_backup(snapshot_path, expected_checksum)? {
+        return Err("Backup integrity check failed — checksum mismatch".to_string());
+    }
+
+    // Open both databases
+    let remote_db = Database::open(snapshot_path)
+        .map_err(|e| format!("Failed to open remote snapshot: {}", e))?;
+    let local_db = Database::open(local_db_path)
+        .map_err(|e| format!("Failed to open local DB: {}", e))?;
+
+    let mut inserted = 0;
+    let mut updated = 0;
+    let mut skipped = 0;
+
+    // Merge impulses
+    let remote_impulses = remote_db.list_impulses(None)
+        .map_err(|e| format!("Failed to list remote impulses: {}", e))?;
+
+    for remote_imp in &remote_impulses {
+        match local_db.get_impulse(&remote_imp.id) {
+            Ok(local_imp) => {
+                // Exists locally — newer wins
+                if remote_imp.last_accessed_at > local_imp.last_accessed_at {
+                    local_db.update_impulse_status(&remote_imp.id, remote_imp.status)
+                        .map_err(|e| format!("Update failed: {}", e))?;
+                    if remote_imp.weight > local_imp.weight {
+                        local_db.update_impulse_weight(&remote_imp.id, remote_imp.weight)
+                            .map_err(|e| format!("Weight update failed: {}", e))?;
+                    }
+                    updated += 1;
+                } else {
+                    skipped += 1;
+                }
+            }
+            Err(_) => {
+                // New record — insert it
+                let input = NewImpulse {
+                    content: remote_imp.content.clone(),
+                    impulse_type: remote_imp.impulse_type,
+                    initial_weight: remote_imp.initial_weight,
+                    emotional_valence: remote_imp.emotional_valence,
+                    engagement_level: remote_imp.engagement_level,
+                    source_signals: remote_imp.source_signals.clone(),
+                    source_type: remote_imp.source_type,
+                    source_ref: remote_imp.source_ref.clone(),
+                };
+                // Use insert_with_id to preserve the original ID
+                local_db.insert_impulse_with_id(&remote_imp.id, &input)
+                    .map_err(|e| format!("Insert failed: {}", e))?;
+                if remote_imp.status == ImpulseStatus::Confirmed {
+                    local_db.confirm_impulse(&remote_imp.id)
+                        .map_err(|e| format!("Confirm failed: {}", e))?;
+                }
+                inserted += 1;
+            }
+        }
+    }
+
+    // TODO: merge connections similarly (ID-based, skip duplicates)
+
+    Ok(SyncMergeResult { inserted, updated, skipped })
+}
+
+#[derive(Debug, Clone)]
+pub struct SyncMergeResult {
+    pub inserted: usize,
+    pub updated: usize,
+    pub skipped: usize,
 }
 
 pub fn read_manifest(sync_dir: &str) -> Result<SyncManifest, String> {
@@ -849,7 +924,7 @@ fn validation_p3_cross_device_consistency() {
 
     // Device A creates memories
     let db_a = Database::open(db_a_path.to_str().unwrap()).unwrap();
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db_a, "Cross-device memory test",
         ImpulseType::Heuristic, EmotionalValence::Positive,
         EngagementLevel::High, vec![], "device-a-session",
@@ -860,8 +935,9 @@ fn validation_p3_cross_device_consistency() {
     // Device A exports
     let export = sync::export_snapshot(&db_a, sync_dir.to_str().unwrap(), "device-a").unwrap();
 
-    // Device B imports
-    sync::import_snapshot(&export.snapshot_path, db_b_path.to_str().unwrap(), &export.checksum).unwrap();
+    // Device B imports via merge
+    let merge = sync::import_snapshot(&export.snapshot_path, db_b_path.to_str().unwrap(), &export.checksum).unwrap();
+    assert_eq!(merge.inserted, a_count as usize);
 
     // Device B should have same data
     let db_b = Database::open(db_b_path.to_str().unwrap()).unwrap();
@@ -886,20 +962,20 @@ fn validation_p3_backup_restore_full_integrity() {
     let db = Database::open(db_path.to_str().unwrap()).unwrap();
 
     // Create a rich graph
-    let a = ingestion::explicit_save(
+    let a = ingestion::save_and_confirm(
         &db, "Node A: Design philosophy",
         ImpulseType::Heuristic, EmotionalValence::Positive,
         EngagementLevel::High, vec!["deep discussion".to_string()], "s1",
     ).unwrap();
 
-    let b = ingestion::explicit_save_with_connections(
+    let b = ingestion::save_and_confirm_with_connections(
         &db, "Node B: Architecture decision",
         ImpulseType::Decision, EmotionalValence::Positive,
         EngagementLevel::High, vec![], "s1",
         &[(a.id.clone(), "derived_from".to_string(), 0.9)],
     ).unwrap();
 
-    let c = ingestion::explicit_save_with_connections(
+    let c = ingestion::save_and_confirm_with_connections(
         &db, "Node C: Implementation detail",
         ImpulseType::Pattern, EmotionalValence::Neutral,
         EngagementLevel::Medium, vec![], "s1",
@@ -963,7 +1039,7 @@ fn validation_p3_cross_source_activation() {
     ).unwrap();
 
     // Add memory graph impulses
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db, "Spreading activation mimics human memory",
         ImpulseType::Heuristic, EmotionalValence::Positive,
         EngagementLevel::High, vec![], "test",
@@ -1019,7 +1095,7 @@ fn validation_p3_sync_preserves_local_first() {
     let db = Database::open(db_path.to_str().unwrap()).unwrap();
 
     // Create local data
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db, "Local memory",
         ImpulseType::Observation, EmotionalValence::Neutral,
         EngagementLevel::Medium, vec![], "test",
@@ -1029,7 +1105,7 @@ fn validation_p3_sync_preserves_local_first() {
     sync::export_snapshot(&db, sync_dir.to_str().unwrap(), "laptop").unwrap();
 
     // Local operations should still work without sync dir
-    ingestion::explicit_save(
+    ingestion::save_and_confirm(
         &db, "Another local memory",
         ImpulseType::Observation, EmotionalValence::Neutral,
         EngagementLevel::Medium, vec![], "test",
