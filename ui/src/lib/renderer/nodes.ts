@@ -1,7 +1,11 @@
-import { Container, Graphics } from "pixi.js";
+import { Container, Graphics, Circle } from "pixi.js";
 import type { GraphNode } from "../types";
 
-export function renderNodes(layer: Container, nodes: GraphNode[]) {
+export function renderNodes(
+  layer: Container,
+  nodes: GraphNode[],
+  onClick?: (nodeId: string) => void
+) {
   layer.removeChildren();
 
   for (const node of nodes) {
@@ -25,10 +29,17 @@ export function renderNodes(layer: Container, nodes: GraphNode[]) {
     g.x = node.x;
     g.y = node.y;
 
-    // Store node ID for hit detection
+    // Hit area and interactivity
+    g.hitArea = new Circle(0, 0, glowRadius);
     g.eventMode = "static";
     g.cursor = "pointer";
     g.label = node.impulse.id;
+
+    if (onClick) {
+      g.on("pointerdown", () => {
+        onClick(node.impulse.id);
+      });
+    }
 
     layer.addChild(g);
   }

@@ -92,9 +92,13 @@ export class GalaxyEngine {
     this.worldContainer.scale.set(this.camera.zoom);
   }
 
-  renderGraph(nodes: GraphNode[], edges: GraphEdge[]) {
+  renderGraph(
+    nodes: GraphNode[],
+    edges: GraphEdge[],
+    onNodeClick?: (nodeId: string) => void
+  ) {
     renderConnections(this.connectionLayer, edges);
-    renderNodes(this.nodeLayer, nodes);
+    renderNodes(this.nodeLayer, nodes, onNodeClick);
     this.centerOnGraph(nodes);
   }
 

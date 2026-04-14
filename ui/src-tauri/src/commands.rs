@@ -240,3 +240,49 @@ pub fn get_ghost_nodes(
         })
     }).collect())
 }
+
+#[derive(serde::Deserialize)]
+pub struct QuickSaveParams {
+    pub content: String,
+    pub impulse_type: String,
+    pub emotional_valence: Option<String>,
+    pub engagement_level: Option<String>,
+    pub source_ref: Option<String>,
+}
+
+#[tauri::command]
+pub fn quick_save(
+    state: State<AppState>,
+    params: QuickSaveParams,
+) -> Result<serde_json::Value, String> {
+    use synaptic_graph::ingestion;
+    use synaptic_graph::models::*;
+
+    let itype = ImpulseType::from_str(&params.impulse_type)
+        .ok_or_else(|| format!("Invalid impulse type: {}", params.impulse_type))?;
+    let valence = params.emotional_valence.as_deref()
+        .map(EmotionalValence::from_str)
+        .unwrap_or(Some(EmotionalValence::Neutral))
+        .ok_or("Invalid valence")?;
+    let engagement = params.engagement_level.as_deref()
+        .map(EngagementLevel::from_str)
+        .unwrap_or(Some(EngagementLevel::Medium))
+        .ok_or("Invalid engagement")?;
+
+    let db = state.db.lock().map_err(|e| format!("Lock error: {}", e))?;
+    let impulse = ingestion::save_and_confirm(
+        &db,
+        &params.content,
+        itype,
+        valence,
+        engagement,
+        vec![],
+        params.source_ref.as_deref().unwrap_or("import"),
+    )?;
+
+    Ok(serde_json::json!({
+        "id": impulse.id,
+        "content": impulse.content,
+        "status": impulse.status.as_str(),
+    }))
+}

@@ -18,6 +18,7 @@ fn main() {
             commands::get_impulse_detail,
             commands::get_ghost_sources,
             commands::get_ghost_nodes,
+            commands::quick_save,
         ])
         .run(tauri::generate_context!())
         .expect("error while running memory-graph-ui");

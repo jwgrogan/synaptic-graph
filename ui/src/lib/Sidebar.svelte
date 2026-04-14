@@ -5,6 +5,7 @@
     { id: "galaxy" as const, label: "Galaxy", icon: "\u2726" },
     { id: "ghosts" as const, label: "Ghost Graphs", icon: "\u25CC" },
     { id: "stats" as const, label: "Stats", icon: "\u25A6" },
+    { id: "import" as const, label: "Import", icon: "\u2B73" },
   ];
 </script>
 

@@ -45,17 +45,12 @@
     const nodeToCluster = detectClusters(impulseData, connectionData);
     const clusterInfo = buildClusterInfo(nodeToCluster, nodePositions);
 
-    // Render
-    engine.renderGraph(layout.nodes, layout.edges);
-    engine.renderNebulae(clusterInfo, nodePositions);
-
-    // Handle node clicks
-    engine.nodeLayer.on("pointerdown", (e) => {
-      const target = e.target;
-      if (target?.label) {
-        selectedNodeId.set(target.label);
-      }
+    // Render with click handler
+    engine.renderGraph(layout.nodes, layout.edges, (nodeId: string) => {
+      console.log(`[synaptic-graph] Node clicked: ${nodeId}`);
+      selectedNodeId.set(nodeId);
     });
+    engine.renderNebulae(clusterInfo, nodePositions);
   });
 
   onDestroy(() => {

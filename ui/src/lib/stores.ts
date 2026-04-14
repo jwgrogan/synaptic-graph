@@ -25,7 +25,7 @@ export const focusedCluster = writable<number | null>(null);
 export const searchOpen = writable(false);
 export const searchResults = writable<SearchResult | null>(null);
 export const activationPath = writable<Set<string>>(new Set());
-export const currentView = writable<"galaxy" | "ghosts" | "stats">("galaxy");
+export const currentView = writable<"galaxy" | "ghosts" | "stats" | "import">("galaxy");
 
 // Camera state
 export const camera = writable({

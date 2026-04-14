@@ -4,6 +4,7 @@
   import Sidebar from "./lib/Sidebar.svelte";
   import StatsView from "./lib/StatsView.svelte";
   import GhostList from "./lib/GhostList.svelte";
+  import ImportView from "./lib/ImportView.svelte";
   import SearchPalette from "./lib/SearchPalette.svelte";
   import { currentView } from "./lib/stores";
 </script>
@@ -19,6 +20,8 @@
       <StatsView />
     {:else if $currentView === "ghosts"}
       <GhostList />
+    {:else if $currentView === "import"}
+      <ImportView />
     {/if}
   </div>
 </div>
