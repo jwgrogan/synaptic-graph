@@ -1,5 +1,7 @@
 pub mod activation;
 pub mod db;
+pub mod extraction;
+pub mod ghost;
 pub mod ingestion;
 pub mod models;
 pub mod redaction;

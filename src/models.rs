@@ -202,6 +202,54 @@ pub struct NewConnection {
     pub relationship: String,
 }
 
+// === Ghost Graph Types ===
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GhostNode {
+    pub id: String,
+    pub source_graph: String,
+    pub external_ref: String,
+    pub title: String,
+    pub metadata: serde_json::Value,
+    pub weight: f64,
+    pub last_accessed_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewGhostNode {
+    pub source_graph: String,
+    pub external_ref: String,
+    pub title: String,
+    pub metadata: serde_json::Value,
+    pub initial_weight: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewGhostConnection {
+    pub source_id: String,
+    pub target_id: String,
+    pub weight: f64,
+    pub relationship: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GhostSource {
+    pub name: String,
+    pub root_path: String,
+    pub source_type: String,
+    pub registered_at: DateTime<Utc>,
+    pub last_scanned_at: Option<DateTime<Utc>>,
+    pub node_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GhostActivation {
+    pub ghost_node: GhostNode,
+    pub activation_score: f64,
+    pub source_graph: String,
+}
+
 // === Retrieval Types ===
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,6 +270,7 @@ pub struct RetrievedMemory {
 pub struct RetrievalResult {
     pub memories: Vec<RetrievedMemory>,
     pub total_nodes_activated: usize,
+    pub ghost_activations: Vec<GhostActivation>,
 }
 
 // === Weight Constants ===

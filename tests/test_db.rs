@@ -1,6 +1,7 @@
 mod common;
 
 use synaptic_graph::models::*;
+use serde_json::json;
 
 #[test]
 fn test_database_creates_tables() {
@@ -348,4 +349,174 @@ fn test_touch_connection() {
     db.touch_connection(&conn.id).unwrap();
     let touched = db.get_connection(&conn.id).unwrap();
     assert_eq!(touched.traversal_count, 1);
+}
+
+// === Ghost Node Tests ===
+
+#[test]
+fn test_insert_and_get_ghost_node() {
+    let db = common::test_db();
+    let input = NewGhostNode {
+        source_graph: "obsidian-vault".to_string(),
+        external_ref: "notes/rust-patterns.md".to_string(),
+        title: "Rust Design Patterns".to_string(),
+        metadata: json!({"tags": ["rust", "patterns"]}),
+        initial_weight: 0.4,
+    };
+
+    let node = db.insert_ghost_node(&input).unwrap();
+    assert_eq!(node.source_graph, "obsidian-vault");
+    assert_eq!(node.external_ref, "notes/rust-patterns.md");
+    assert_eq!(node.title, "Rust Design Patterns");
+    assert_eq!(node.weight, 0.4);
+
+    // Retrieve by id
+    let fetched = db.get_ghost_node(&node.id).unwrap();
+    assert_eq!(fetched.id, node.id);
+    assert_eq!(fetched.title, "Rust Design Patterns");
+
+    // Retrieve by ref
+    let by_ref = db.get_ghost_node_by_ref("obsidian-vault", "notes/rust-patterns.md").unwrap();
+    assert_eq!(by_ref.id, node.id);
+
+    // Touch and verify last_accessed_at updates
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    db.touch_ghost_node(&node.id).unwrap();
+    let touched = db.get_ghost_node(&node.id).unwrap();
+    assert!(touched.last_accessed_at >= node.last_accessed_at);
+
+    // Update weight
+    db.update_ghost_node_weight(&node.id, 0.8).unwrap();
+    let updated = db.get_ghost_node(&node.id).unwrap();
+    assert_eq!(updated.weight, 0.8);
+}
+
+#[test]
+fn test_list_ghost_nodes_by_source() {
+    let db = common::test_db();
+
+    // Insert nodes from two different sources
+    db.insert_ghost_node(&NewGhostNode {
+        source_graph: "vault-a".to_string(),
+        external_ref: "note1.md".to_string(),
+        title: "Note One".to_string(),
+        metadata: json!({}),
+        initial_weight: 0.3,
+    }).unwrap();
+
+    db.insert_ghost_node(&NewGhostNode {
+        source_graph: "vault-a".to_string(),
+        external_ref: "note2.md".to_string(),
+        title: "Note Two".to_string(),
+        metadata: json!({}),
+        initial_weight: 0.5,
+    }).unwrap();
+
+    db.insert_ghost_node(&NewGhostNode {
+        source_graph: "vault-b".to_string(),
+        external_ref: "other.md".to_string(),
+        title: "Other Note".to_string(),
+        metadata: json!({}),
+        initial_weight: 0.4,
+    }).unwrap();
+
+    let vault_a_nodes = db.list_ghost_nodes_by_source("vault-a").unwrap();
+    assert_eq!(vault_a_nodes.len(), 2);
+
+    let vault_b_nodes = db.list_ghost_nodes_by_source("vault-b").unwrap();
+    assert_eq!(vault_b_nodes.len(), 1);
+    assert_eq!(vault_b_nodes[0].title, "Other Note");
+
+    // Delete by source and verify
+    let deleted = db.delete_ghost_nodes_by_source("vault-a").unwrap();
+    assert_eq!(deleted, 2);
+
+    let vault_a_after = db.list_ghost_nodes_by_source("vault-a").unwrap();
+    assert_eq!(vault_a_after.len(), 0);
+
+    // vault-b should be unaffected
+    let vault_b_after = db.list_ghost_nodes_by_source("vault-b").unwrap();
+    assert_eq!(vault_b_after.len(), 1);
+}
+
+#[test]
+fn test_ghost_node_connections() {
+    let db = common::test_db();
+
+    let node_a = db.insert_ghost_node(&NewGhostNode {
+        source_graph: "vault".to_string(),
+        external_ref: "a.md".to_string(),
+        title: "Ghost A".to_string(),
+        metadata: json!({}),
+        initial_weight: 0.5,
+    }).unwrap();
+
+    let node_b = db.insert_ghost_node(&NewGhostNode {
+        source_graph: "vault".to_string(),
+        external_ref: "b.md".to_string(),
+        title: "Ghost B".to_string(),
+        metadata: json!({}),
+        initial_weight: 0.5,
+    }).unwrap();
+
+    let conn = db.insert_ghost_connection(&NewGhostConnection {
+        source_id: node_a.id.clone(),
+        target_id: node_b.id.clone(),
+        weight: 0.7,
+        relationship: "links_to".to_string(),
+    }).unwrap();
+
+    assert_eq!(conn.source_id, node_a.id);
+    assert_eq!(conn.target_id, node_b.id);
+    assert_eq!(conn.weight, 0.7);
+    assert_eq!(conn.relationship, "links_to");
+    assert_eq!(conn.traversal_count, 0);
+
+    // Get connections for node_a
+    let conns = db.get_ghost_connections_for_node(&node_a.id).unwrap();
+    assert_eq!(conns.len(), 1);
+    assert_eq!(conns[0].id, conn.id);
+
+    // Get connections for node_b (bidirectional query)
+    let conns_b = db.get_ghost_connections_for_node(&node_b.id).unwrap();
+    assert_eq!(conns_b.len(), 1);
+}
+
+#[test]
+fn test_ghost_source_registry() {
+    let db = common::test_db();
+
+    // Register a source
+    let source = db.register_ghost_source("my-vault", "/home/user/vault", "obsidian").unwrap();
+    assert_eq!(source.name, "my-vault");
+    assert_eq!(source.root_path, "/home/user/vault");
+    assert_eq!(source.source_type, "obsidian");
+    assert!(source.last_scanned_at.is_none());
+    assert_eq!(source.node_count, 0);
+
+    // List sources
+    let sources = db.list_ghost_sources().unwrap();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].name, "my-vault");
+
+    // Add a ghost node and check node_count
+    db.insert_ghost_node(&NewGhostNode {
+        source_graph: "my-vault".to_string(),
+        external_ref: "test.md".to_string(),
+        title: "Test Note".to_string(),
+        metadata: json!({}),
+        initial_weight: 0.3,
+    }).unwrap();
+
+    let sources = db.list_ghost_sources().unwrap();
+    assert_eq!(sources[0].node_count, 1);
+
+    // Update scanned timestamp
+    db.update_ghost_source_scanned("my-vault").unwrap();
+    let sources = db.list_ghost_sources().unwrap();
+    assert!(sources[0].last_scanned_at.is_some());
+
+    // FTS search on ghost nodes
+    let results = db.search_ghost_nodes_fts("Test Note").unwrap();
+    assert_eq!(results.len(), 1);
 }

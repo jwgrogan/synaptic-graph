@@ -26,6 +26,7 @@ impl<'a> ActivationEngine<'a> {
             return Ok(RetrievalResult {
                 memories: vec![],
                 total_nodes_activated: 0,
+                ghost_activations: vec![],
             });
         }
 
@@ -180,6 +181,7 @@ impl<'a> ActivationEngine<'a> {
         Ok(RetrievalResult {
             memories: results,
             total_nodes_activated: total_activated,
+            ghost_activations: vec![],
         })
     }
 }

@@ -78,6 +78,49 @@ impl Database {
                 content_rowid='rowid',
                 tokenize='porter'
             );
+
+            CREATE TABLE IF NOT EXISTS ghost_nodes (
+                id TEXT PRIMARY KEY,
+                source_graph TEXT NOT NULL,
+                external_ref TEXT NOT NULL,
+                title TEXT NOT NULL,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                weight REAL NOT NULL,
+                last_accessed_at TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(source_graph, external_ref)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_ghost_nodes_source_graph ON ghost_nodes(source_graph);
+
+            CREATE TABLE IF NOT EXISTS ghost_connections (
+                id TEXT PRIMARY KEY,
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                weight REAL NOT NULL,
+                relationship TEXT NOT NULL DEFAULT 'relates_to',
+                created_at TEXT NOT NULL,
+                last_traversed_at TEXT NOT NULL,
+                traversal_count INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (source_id) REFERENCES ghost_nodes(id),
+                FOREIGN KEY (target_id) REFERENCES ghost_nodes(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_ghost_connections_source_target ON ghost_connections(source_id, target_id);
+
+            CREATE TABLE IF NOT EXISTS ghost_sources (
+                name TEXT PRIMARY KEY,
+                root_path TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                registered_at TEXT NOT NULL,
+                last_scanned_at TEXT
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS ghost_nodes_fts USING fts5(
+                title,
+                content_rowid='rowid',
+                tokenize='porter'
+            );
             ",
         )?;
         Ok(())
@@ -325,6 +368,204 @@ impl Database {
             .query_row("SELECT COUNT(*) FROM connections", [], |row| row.get(0))
     }
 
+    // === Ghost Node Operations ===
+
+    pub fn insert_ghost_node(&self, input: &NewGhostNode) -> SqlResult<GhostNode> {
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+        let metadata_str = serde_json::to_string(&input.metadata).unwrap_or_else(|_| "{}".to_string());
+
+        self.conn.execute(
+            "INSERT INTO ghost_nodes (id, source_graph, external_ref, title, metadata, weight, last_accessed_at, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                id,
+                input.source_graph,
+                input.external_ref,
+                input.title,
+                metadata_str,
+                input.initial_weight,
+                now_str,
+                now_str,
+            ],
+        )?;
+
+        // Insert into FTS index
+        self.conn.execute(
+            "INSERT INTO ghost_nodes_fts (rowid, title)
+             SELECT rowid, title FROM ghost_nodes WHERE id = ?1",
+            params![id],
+        )?;
+
+        self.get_ghost_node(&id)
+    }
+
+    pub fn get_ghost_node(&self, id: &str) -> SqlResult<GhostNode> {
+        self.conn.query_row(
+            "SELECT id, source_graph, external_ref, title, metadata, weight, last_accessed_at, created_at
+             FROM ghost_nodes WHERE id = ?1",
+            params![id],
+            |row| Ok(row_to_ghost_node(row)),
+        )
+    }
+
+    pub fn get_ghost_node_by_ref(&self, source_graph: &str, external_ref: &str) -> SqlResult<GhostNode> {
+        self.conn.query_row(
+            "SELECT id, source_graph, external_ref, title, metadata, weight, last_accessed_at, created_at
+             FROM ghost_nodes WHERE source_graph = ?1 AND external_ref = ?2",
+            params![source_graph, external_ref],
+            |row| Ok(row_to_ghost_node(row)),
+        )
+    }
+
+    pub fn list_ghost_nodes_by_source(&self, source_graph: &str) -> SqlResult<Vec<GhostNode>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, source_graph, external_ref, title, metadata, weight, last_accessed_at, created_at
+             FROM ghost_nodes WHERE source_graph = ?1 ORDER BY weight DESC",
+        )?;
+        let rows = stmt.query_map(params![source_graph], |row| Ok(row_to_ghost_node(row)))?;
+        rows.collect()
+    }
+
+    pub fn touch_ghost_node(&self, id: &str) -> SqlResult<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE ghost_nodes SET last_accessed_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_ghost_node_weight(&self, id: &str, weight: f64) -> SqlResult<()> {
+        self.conn.execute(
+            "UPDATE ghost_nodes SET weight = ?1 WHERE id = ?2",
+            params![weight, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_ghost_nodes_by_source(&self, source_graph: &str) -> SqlResult<usize> {
+        // Delete FTS entries first
+        self.conn.execute(
+            "DELETE FROM ghost_nodes_fts WHERE rowid IN (SELECT rowid FROM ghost_nodes WHERE source_graph = ?1)",
+            params![source_graph],
+        )?;
+        // Delete connections involving these nodes
+        self.conn.execute(
+            "DELETE FROM ghost_connections WHERE source_id IN (SELECT id FROM ghost_nodes WHERE source_graph = ?1)
+             OR target_id IN (SELECT id FROM ghost_nodes WHERE source_graph = ?1)",
+            params![source_graph],
+        )?;
+        let count = self.conn.execute(
+            "DELETE FROM ghost_nodes WHERE source_graph = ?1",
+            params![source_graph],
+        )?;
+        Ok(count)
+    }
+
+    pub fn search_ghost_nodes_fts(&self, query: &str) -> SqlResult<Vec<(String, f64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT gn.id, fts.rank
+             FROM ghost_nodes_fts fts
+             JOIN ghost_nodes gn ON gn.rowid = fts.rowid
+             WHERE ghost_nodes_fts MATCH ?1
+             ORDER BY fts.rank",
+        )?;
+        let rows = stmt.query_map(params![query], |row| {
+            let id: String = row.get(0)?;
+            let rank: f64 = row.get(1)?;
+            Ok((id, rank))
+        })?;
+        rows.collect()
+    }
+
+    // === Ghost Connection Operations ===
+
+    pub fn insert_ghost_connection(&self, input: &NewGhostConnection) -> SqlResult<Connection> {
+        let id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+
+        self.conn.execute(
+            "INSERT INTO ghost_connections (id, source_id, target_id, weight, relationship, created_at, last_traversed_at, traversal_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
+            params![
+                id,
+                input.source_id,
+                input.target_id,
+                input.weight,
+                input.relationship,
+                now_str,
+                now_str,
+            ],
+        )?;
+
+        self.get_ghost_connection(&id)
+    }
+
+    fn get_ghost_connection(&self, id: &str) -> SqlResult<Connection> {
+        self.conn.query_row(
+            "SELECT id, source_id, target_id, weight, relationship, created_at, last_traversed_at, traversal_count
+             FROM ghost_connections WHERE id = ?1",
+            params![id],
+            |row| Ok(row_to_connection(row)),
+        )
+    }
+
+    pub fn get_ghost_connections_for_node(&self, node_id: &str) -> SqlResult<Vec<Connection>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, source_id, target_id, weight, relationship, created_at, last_traversed_at, traversal_count
+             FROM ghost_connections
+             WHERE source_id = ?1 OR target_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![node_id], |row| Ok(row_to_connection(row)))?;
+        rows.collect()
+    }
+
+    // === Ghost Source Operations ===
+
+    pub fn register_ghost_source(&self, name: &str, root_path: &str, source_type: &str) -> SqlResult<GhostSource> {
+        let now = Utc::now().to_rfc3339();
+
+        self.conn.execute(
+            "INSERT OR REPLACE INTO ghost_sources (name, root_path, source_type, registered_at, last_scanned_at)
+             VALUES (?1, ?2, ?3, ?4, NULL)",
+            params![name, root_path, source_type, now],
+        )?;
+
+        self.get_ghost_source(name)
+    }
+
+    fn get_ghost_source(&self, name: &str) -> SqlResult<GhostSource> {
+        self.conn.query_row(
+            "SELECT gs.name, gs.root_path, gs.source_type, gs.registered_at, gs.last_scanned_at,
+             (SELECT COUNT(*) FROM ghost_nodes WHERE source_graph = gs.name) as node_count
+             FROM ghost_sources gs WHERE gs.name = ?1",
+            params![name],
+            |row| Ok(row_to_ghost_source(row)),
+        )
+    }
+
+    pub fn update_ghost_source_scanned(&self, name: &str) -> SqlResult<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE ghost_sources SET last_scanned_at = ?1 WHERE name = ?2",
+            params![now, name],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_ghost_sources(&self) -> SqlResult<Vec<GhostSource>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT gs.name, gs.root_path, gs.source_type, gs.registered_at, gs.last_scanned_at,
+             (SELECT COUNT(*) FROM ghost_nodes WHERE source_graph = gs.name) as node_count
+             FROM ghost_sources gs ORDER BY gs.name",
+        )?;
+        let rows = stmt.query_map([], |row| Ok(row_to_ghost_source(row)))?;
+        rows.collect()
+    }
+
     // === Stats ===
 
     pub fn memory_stats(&self) -> SqlResult<MemoryStats> {
@@ -406,6 +647,47 @@ fn row_to_connection(row: &rusqlite::Row) -> Connection {
             .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(|_| Utc::now()),
         traversal_count: row.get(7).unwrap_or(0),
+    }
+}
+
+fn row_to_ghost_node(row: &rusqlite::Row) -> GhostNode {
+    let metadata_str: String = row.get(4).unwrap_or_else(|_| "{}".to_string());
+    let created_str: String = row.get(7).unwrap_or_default();
+    let accessed_str: String = row.get(6).unwrap_or_default();
+
+    GhostNode {
+        id: row.get(0).unwrap_or_default(),
+        source_graph: row.get(1).unwrap_or_default(),
+        external_ref: row.get(2).unwrap_or_default(),
+        title: row.get(3).unwrap_or_default(),
+        metadata: serde_json::from_str(&metadata_str).unwrap_or(serde_json::Value::Object(Default::default())),
+        weight: row.get(5).unwrap_or(0.0),
+        last_accessed_at: DateTime::parse_from_rfc3339(&accessed_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
+        created_at: DateTime::parse_from_rfc3339(&created_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
+    }
+}
+
+fn row_to_ghost_source(row: &rusqlite::Row) -> GhostSource {
+    let registered_str: String = row.get(3).unwrap_or_default();
+    let scanned_str: Option<String> = row.get(4).unwrap_or(None);
+
+    GhostSource {
+        name: row.get(0).unwrap_or_default(),
+        root_path: row.get(1).unwrap_or_default(),
+        source_type: row.get(2).unwrap_or_default(),
+        registered_at: DateTime::parse_from_rfc3339(&registered_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now()),
+        last_scanned_at: scanned_str.and_then(|s| {
+            DateTime::parse_from_rfc3339(&s)
+                .map(|dt| dt.with_timezone(&Utc))
+                .ok()
+        }),
+        node_count: row.get(5).unwrap_or(0),
     }
 }
 
