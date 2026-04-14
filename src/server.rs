@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::activation::ActivationEngine;
 use crate::db::Database;
+use crate::ghost;
 use crate::ingestion;
 use crate::models::*;
 use crate::session::Session;
@@ -268,6 +269,86 @@ impl MemoryGraphServer {
         serde_json::to_string_pretty(&candidates)
             .map_err(|e| format!("Serialization error: {}", e))
     }
+
+    pub fn handle_register_ghost_graph(
+        &self,
+        name: String,
+        root_path: String,
+        source_type: Option<String>,
+        ignore_patterns: Option<Vec<String>>,
+    ) -> Result<String, String> {
+        let stype = source_type.unwrap_or_else(|| "directory".to_string());
+        let config = ghost::scanner::ScanConfig {
+            extensions: vec!["md".to_string()],
+            ignore_patterns: ignore_patterns.unwrap_or_default(),
+        };
+
+        let db = self.db.lock().unwrap();
+        let count = ghost::register_and_scan(&db, &name, &root_path, &stype, &config)?;
+
+        let response = serde_json::json!({
+            "name": name,
+            "root_path": root_path,
+            "source_type": stype,
+            "nodes_scanned": count,
+        });
+
+        serde_json::to_string_pretty(&response)
+            .map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_refresh_ghost_graph(&self, name: String) -> Result<String, String> {
+        let config = ghost::scanner::ScanConfig {
+            extensions: vec!["md".to_string()],
+            ignore_patterns: vec![],
+        };
+
+        let db = self.db.lock().unwrap();
+        let count = ghost::refresh(&db, &name, &config)?;
+
+        let response = serde_json::json!({
+            "name": name,
+            "nodes_refreshed": count,
+        });
+
+        serde_json::to_string_pretty(&response)
+            .map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_pull_through(
+        &self,
+        source_graph: String,
+        external_ref: String,
+        mode: Option<String>,
+    ) -> Result<String, String> {
+        let pull_mode = match mode.as_deref() {
+            Some("permanent") => ghost::PullMode::Permanent,
+            _ => ghost::PullMode::SessionOnly,
+        };
+
+        let db = self.db.lock().unwrap();
+        let ghost_node = db.get_ghost_node_by_ref(&source_graph, &external_ref)
+            .map_err(|e| format!("Ghost node not found: {}", e))?;
+
+        let sources = db.list_ghost_sources()
+            .map_err(|e| format!("Failed to list sources: {}", e))?;
+
+        let source = sources.iter().find(|s| s.name == source_graph)
+            .ok_or_else(|| format!("Source '{}' not found", source_graph))?;
+
+        let content = ghost::pull::pull_ghost_content(&db, &ghost_node, &source.root_path, pull_mode)?;
+
+        let response = serde_json::json!({
+            "ghost_node_id": ghost_node.id,
+            "source_graph": source_graph,
+            "external_ref": external_ref,
+            "mode": format!("{:?}", pull_mode),
+            "content": content,
+        });
+
+        serde_json::to_string_pretty(&response)
+            .map_err(|e| format!("Serialization error: {}", e))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -361,6 +442,37 @@ pub struct DismissProposalParams {
     pub id: String,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RegisterGhostGraphParams {
+    /// Name for this ghost graph (e.g., 'obsidian-vault').
+    pub name: String,
+    /// Root path to the knowledge base directory.
+    pub root_path: String,
+    /// Source type (e.g., 'obsidian', 'directory'). Defaults to 'directory'.
+    #[schemars(default)]
+    pub source_type: Option<String>,
+    /// Path patterns to ignore during scan.
+    #[schemars(default)]
+    pub ignore_patterns: Option<Vec<String>>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RefreshGhostGraphParams {
+    /// Name of the ghost graph to refresh.
+    pub name: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct PullThroughParams {
+    /// Name of the ghost graph source.
+    pub source_graph: String,
+    /// External reference path of the ghost node.
+    pub external_ref: String,
+    /// Pull mode: 'session_only' (default) or 'permanent'.
+    #[schemars(default)]
+    pub mode: Option<String>,
+}
+
 #[tool(tool_box)]
 impl McpHandler {
     #[tool(description = "Save a new memory to the graph")]
@@ -452,6 +564,39 @@ impl McpHandler {
     #[tool(description = "List all candidate memory proposals")]
     fn list_candidates(&self) -> Result<String, String> {
         self.inner.handle_list_candidates()
+    }
+
+    #[tool(description = "Register an external knowledge base as a ghost graph. Scans the directory for markdown files and maps their structure without ingesting content.")]
+    fn register_ghost_graph(
+        &self,
+        #[tool(aggr)] params: RegisterGhostGraphParams,
+    ) -> Result<String, String> {
+        self.inner.handle_register_ghost_graph(
+            params.name,
+            params.root_path,
+            params.source_type,
+            params.ignore_patterns,
+        )
+    }
+
+    #[tool(description = "Refresh a ghost graph by re-scanning the external knowledge base for changes")]
+    fn refresh_ghost_graph(
+        &self,
+        #[tool(aggr)] params: RefreshGhostGraphParams,
+    ) -> Result<String, String> {
+        self.inner.handle_refresh_ghost_graph(params.name)
+    }
+
+    #[tool(description = "Pull content from a ghost node. 'session_only' releases after session. 'permanent' creates a memory node.")]
+    fn pull_through(
+        &self,
+        #[tool(aggr)] params: PullThroughParams,
+    ) -> Result<String, String> {
+        self.inner.handle_pull_through(
+            params.source_graph,
+            params.external_ref,
+            params.mode,
+        )
     }
 }
 
