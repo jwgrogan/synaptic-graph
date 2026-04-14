@@ -1,6 +1,8 @@
 mod common;
 
 use synaptic_graph::activation::ActivationEngine;
+use synaptic_graph::ghost;
+use synaptic_graph::ghost::ScanConfig;
 use synaptic_graph::models::*;
 
 fn seed_graph(db: &synaptic_graph::db::Database) -> (String, String, String) {
@@ -316,4 +318,83 @@ fn test_retrieval_reinforces_traversed_connections() {
     // Connection should have been reinforced
     assert!(ab_conn.weight >= weight_before);
     assert!(ab_conn.traversal_count > count_before);
+}
+
+#[test]
+fn test_activation_includes_ghost_nodes() {
+    use std::fs;
+    use tempfile::TempDir;
+
+    let db = common::test_db();
+
+    // Add a regular confirmed impulse so we have both ghost and normal results
+    let imp = db
+        .insert_impulse(&NewImpulse {
+            content: "Rust concurrency patterns for parallel systems".to_string(),
+            impulse_type: ImpulseType::Heuristic,
+            initial_weight: 0.7,
+            emotional_valence: EmotionalValence::Positive,
+            engagement_level: EngagementLevel::High,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+        })
+        .unwrap();
+    db.confirm_impulse(&imp.id).unwrap();
+
+    // Create a temporary vault with markdown files that match the same query
+    let vault_dir = TempDir::new().unwrap();
+    let vault_path = vault_dir.path();
+
+    fs::write(
+        vault_path.join("rust-patterns.md"),
+        "# Rust Design Patterns\n\nNotes on Rust concurrency and parallel programming.\n",
+    )
+    .unwrap();
+
+    fs::write(
+        vault_path.join("other-note.md"),
+        "# Cooking Recipes\n\nThis note is about cooking and has nothing to do with programming.\n",
+    )
+    .unwrap();
+
+    // Register and scan the ghost graph
+    let config = ScanConfig {
+        extensions: vec!["md".to_string()],
+        ignore_patterns: vec![],
+    };
+    let node_count = ghost::register_and_scan(
+        &db,
+        "test-vault",
+        vault_path.to_str().unwrap(),
+        "obsidian",
+        &config,
+    )
+    .unwrap();
+    assert!(node_count >= 2);
+
+    // Query something that should match both the impulse and the ghost node
+    let engine = ActivationEngine::new(&db);
+    let request = RetrievalRequest {
+        query: "Rust patterns".to_string(),
+        max_results: 10,
+        max_hops: 3,
+    };
+
+    let result = engine.retrieve(&request).unwrap();
+
+    // Regular impulse should be in memories
+    assert!(!result.memories.is_empty());
+
+    // Ghost activations should be non-empty (the "Rust Design Patterns" ghost node should match)
+    assert!(
+        !result.ghost_activations.is_empty(),
+        "Expected non-empty ghost_activations but got none"
+    );
+
+    // Verify the ghost activation has correct source_graph
+    assert_eq!(result.ghost_activations[0].source_graph, "test-vault");
+
+    // Verify activation score is above threshold
+    assert!(result.ghost_activations[0].activation_score >= ACTIVATION_THRESHOLD);
 }

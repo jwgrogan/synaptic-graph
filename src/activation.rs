@@ -22,7 +22,20 @@ impl<'a> ActivationEngine<'a> {
             .search_impulses_fts(&request.query)
             .map_err(|e| format!("FTS search failed: {}", e))?;
 
-        if seed_matches.is_empty() {
+        // Also search ghost nodes via FTS
+        let ghost_matches = self
+            .db
+            .search_ghost_nodes_fts(&request.query)
+            .map_err(|e| format!("Ghost FTS failed: {}", e))?;
+
+        // Build ghost activations map with same normalization as impulse matches
+        let mut ghost_activations_map: HashMap<String, f64> = HashMap::new();
+        for (id, rank) in &ghost_matches {
+            let score = (-rank).min(1.0).max(0.1);
+            ghost_activations_map.insert(id.clone(), score);
+        }
+
+        if seed_matches.is_empty() && ghost_matches.is_empty() {
             return Ok(RetrievalResult {
                 memories: vec![],
                 total_nodes_activated: 0,
@@ -178,10 +191,31 @@ impl<'a> ActivationEngine<'a> {
 
         let total_activated = activations.len();
 
+        // Build ghost activations from ghost FTS matches
+        let mut ghost_activations: Vec<GhostActivation> = Vec::new();
+        for (id, score) in &ghost_activations_map {
+            if *score < ACTIVATION_THRESHOLD {
+                continue;
+            }
+            if let Ok(ghost_node) = self.db.get_ghost_node(id) {
+                let source_graph = ghost_node.source_graph.clone();
+                ghost_activations.push(GhostActivation {
+                    ghost_node,
+                    activation_score: *score,
+                    source_graph,
+                });
+            }
+        }
+        ghost_activations.sort_by(|a, b| {
+            b.activation_score
+                .partial_cmp(&a.activation_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
         Ok(RetrievalResult {
             memories: results,
             total_nodes_activated: total_activated,
-            ghost_activations: vec![],
+            ghost_activations,
         })
     }
 }
