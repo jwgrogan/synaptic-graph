@@ -29,24 +29,26 @@ export function renderNodes(
     g.circle(0, 0, node.radius * 0.35);
     g.fill({ color: 0xffffff, alpha: 0.6 + weight * 0.4 });
 
-    // Node label (hidden by default, shown on hover)
-    const labelStyle = new TextStyle({
-      fontFamily: "DM Sans, system-ui, sans-serif",
-      fontSize: 10,
-      fill: "#c7d2fe",
-      wordWrap: true,
-      wordWrapWidth: 120,
-    });
-    const label = new Text({
-      text: node.impulse.content.slice(0, 40) + (node.impulse.content.length > 40 ? "..." : ""),
-      style: labelStyle,
-    });
-    label.anchor.set(0.5, 0);
-    label.x = 0;
-    label.y = node.radius + 4;
-    label.alpha = 0;
-    label.label = "nodelabel";
-    g.addChild(label);
+    // Only add label for nodes large enough to matter (Text objects are expensive)
+    if (node.radius > 5) {
+      const labelStyle = new TextStyle({
+        fontFamily: "DM Sans, system-ui, sans-serif",
+        fontSize: 10,
+        fill: "#c7d2fe",
+        wordWrap: true,
+        wordWrapWidth: 120,
+      });
+      const label = new Text({
+        text: node.impulse.content.slice(0, 40) + (node.impulse.content.length > 40 ? "..." : ""),
+        style: labelStyle,
+      });
+      label.anchor.set(0.5, 0);
+      label.x = 0;
+      label.y = node.radius + 4;
+      label.alpha = 0;
+      label.label = "nodelabel";
+      g.addChild(label);
+    }
 
     // Source provider badge
     const providerColors: Record<string, number> = {
