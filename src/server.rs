@@ -518,6 +518,96 @@ impl MemoryGraphServer {
         Ok(format!("{{\"untagged\": true, \"impulse_id\": \"{}\", \"tag\": \"{}\"}}", impulse_id, tag_name))
     }
 
+    pub fn handle_export_to_obsidian(&self, output_dir: String) -> Result<String, String> {
+        let db = self.db.lock().unwrap();
+        let result = crate::markdown::export_to_markdown(&db, &output_dir)?;
+        let response = serde_json::json!({
+            "files_written": result.files_written,
+            "output_dir": result.output_dir,
+        });
+        serde_json::to_string_pretty(&response)
+            .map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_recall_narrative(&self, topic: String) -> Result<String, String> {
+        let db = self.db.lock().unwrap();
+        let engine = ActivationEngine::new(&db);
+        let result = engine.retrieve(&RetrievalRequest {
+            query: topic.clone(),
+            max_results: 20,
+            max_hops: 5,
+        })?;
+
+        let mut narrative_parts = Vec::new();
+        for mem in &result.memories {
+            let tags = db.get_tags_for_impulse(&mem.impulse.id).unwrap_or_default();
+            let tag_str = tags.iter().map(|t| t.name.clone()).collect::<Vec<_>>().join(", ");
+            let conns = db.get_connections_for_node(&mem.impulse.id).unwrap_or_default();
+
+            narrative_parts.push(serde_json::json!({
+                "content": mem.impulse.content,
+                "type": mem.impulse.impulse_type.as_str(),
+                "weight": mem.impulse.weight,
+                "activation_score": mem.activation_score,
+                "tags": tag_str,
+                "connections": conns.len(),
+                "engagement": mem.impulse.engagement_level.as_str(),
+                "source_provider": mem.impulse.source_provider,
+            }));
+        }
+
+        let response = serde_json::json!({
+            "topic": topic,
+            "impulse_count": result.memories.len(),
+            "narrative_context": narrative_parts,
+            "instruction": "Reconstruct a coherent narrative from these connected impulses. Tell the story of what was learned, decided, and understood about this topic. Use the activation scores to prioritize more relevant pieces."
+        });
+
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization: {}", e))
+    }
+
+    pub fn handle_propose_memories(
+        &self,
+        session_content: String,
+        session_duration_minutes: Option<f64>,
+    ) -> Result<String, String> {
+        let word_count = session_content.split_whitespace().count();
+        let decision_count = crate::extraction::count_keywords(&session_content, crate::extraction::DECISION_KEYWORDS);
+        let emotional_count = crate::extraction::count_keywords(&session_content, crate::extraction::EMOTIONAL_KEYWORDS);
+        let turn_estimate = (word_count / 50).max(1);
+
+        let signals = crate::extraction::EngagementSignals {
+            total_turns: turn_estimate,
+            avg_user_message_length: (word_count / turn_estimate) as f64,
+            avg_assistant_message_length: 0.0,
+            session_duration_minutes: session_duration_minutes.unwrap_or(30.0),
+            explicit_save_count: 0,
+            topic_count: 1,
+            decision_keywords_found: decision_count,
+            emotional_keywords_found: emotional_count,
+        };
+
+        let depth = crate::extraction::assess_engagement(&signals);
+
+        let response = serde_json::json!({
+            "engagement_score": signals.engagement_score(),
+            "depth": format!("{:?}", depth),
+            "max_proposals": depth.max_proposals(),
+            "instruction": format!(
+                "Extract up to {} key impulses from this session. Focus on decisions made, insights discovered, preferences expressed, patterns observed. For each, call quick_save with type and engagement_level.",
+                depth.max_proposals()
+            ),
+            "session_stats": {
+                "word_count": word_count,
+                "estimated_turns": turn_estimate,
+                "decision_keywords": decision_count,
+                "emotional_keywords": emotional_count,
+            }
+        });
+
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization: {}", e))
+    }
+
     pub fn handle_sync_status(
         &self,
         sync_dir: String,
@@ -708,6 +798,12 @@ pub struct SyncStatusParams {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ExportToObsidianParams {
+    /// The output directory where markdown files will be written. This becomes an Obsidian vault.
+    pub output_dir: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct CreateTagParams {
     /// The name of the tag.
     pub name: String,
@@ -730,6 +826,21 @@ pub struct UntagMemoryParams {
     pub impulse_id: String,
     /// The name of the tag to remove.
     pub tag_name: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RecallNarrativeParams {
+    /// The topic to recall a narrative about.
+    pub topic: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ProposeMemoriesParams {
+    /// The session content (conversation text) to analyze for memory extraction.
+    pub session_content: String,
+    /// Optional session duration in minutes. Defaults to 30.
+    #[schemars(default)]
+    pub session_duration_minutes: Option<f64>,
 }
 
 #[tool(tool_box)]
@@ -923,6 +1034,14 @@ impl McpHandler {
             .handle_sync_status(params.sync_dir, params.device_id)
     }
 
+    #[tool(description = "Export the memory graph as linked markdown files suitable for an Obsidian vault. Creates one .md file per confirmed memory with YAML frontmatter, wikilinks for connections, and tag index files.")]
+    fn export_to_obsidian(
+        &self,
+        #[tool(aggr)] params: ExportToObsidianParams,
+    ) -> Result<String, String> {
+        self.inner.handle_export_to_obsidian(params.output_dir)
+    }
+
     #[tool(description = "Create a tag with a name and hex color for organizing memories")]
     fn create_tag(
         &self,
@@ -951,6 +1070,22 @@ impl McpHandler {
     ) -> Result<String, String> {
         self.inner.handle_untag_memory(params.impulse_id, params.tag_name)
     }
+
+    #[tool(description = "Recall a narrative about a topic — retrieves connected impulses with context for the LLM to reconstruct a coherent story")]
+    fn recall_narrative(
+        &self,
+        #[tool(aggr)] params: RecallNarrativeParams,
+    ) -> Result<String, String> {
+        self.inner.handle_recall_narrative(params.topic)
+    }
+
+    #[tool(description = "Analyze a session and propose memories to extract. Returns engagement assessment and extraction instructions for the LLM.")]
+    fn propose_memories(
+        &self,
+        #[tool(aggr)] params: ProposeMemoriesParams,
+    ) -> Result<String, String> {
+        self.inner.handle_propose_memories(params.session_content, params.session_duration_minutes)
+    }
 }
 
 #[tool(tool_box)]
@@ -972,6 +1107,7 @@ impl ServerHandler for McpHandler {
                     "- At the start of a session if the user seems to be continuing prior work\n",
                     "- Do NOT recall on every message — only when context would genuinely help.\n\n",
                     "Use quick_save (saves and confirms in one call). Set engagement_level to 'high' only for deeply engaged discussions.\n",
+                    "At the end of long sessions, call propose_memories with the session summary to extract key learnings.\n",
                 )
                     .into(),
             ),

@@ -10,6 +10,9 @@
   let registerName = "";
   let registerResult = "";
 
+  let exporting = false;
+  let exportResult = "";
+
   onMount(async () => {
     await loadSources();
   });
@@ -46,6 +49,32 @@
     }
 
     registering = false;
+  }
+
+  async function pickAndExport() {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "Choose Export Folder",
+    });
+
+    if (!selected) return;
+
+    const path = selected as string;
+    exporting = true;
+    exportResult = "";
+
+    try {
+      const result = await invoke<{ files_written: number; output_dir: string }>(
+        "export_to_obsidian",
+        { outputDir: path }
+      );
+      exportResult = `Exported ${result.files_written} files to ${result.output_dir}`;
+    } catch (err) {
+      exportResult = `Error: ${err}`;
+    }
+
+    exporting = false;
   }
 
   function sourceAccent(type: string): string {
@@ -87,6 +116,21 @@
         <div class="ghost-path">{source.root_path}</div>
       </div>
     {/each}
+  {/if}
+</div>
+
+<div class="export-section">
+  <h2>Export to Obsidian</h2>
+  <p class="subtitle">Export your memory graph as linked markdown files that work as an Obsidian vault.</p>
+
+  <button class="connect-btn export-btn" on:click={pickAndExport} disabled={exporting}>
+    {exporting ? "Exporting..." : "Choose Export Folder"}
+  </button>
+
+  {#if exportResult}
+    <div class="register-result" class:error={exportResult.startsWith("Error")}>
+      {exportResult}
+    </div>
   {/if}
 </div>
 
@@ -180,5 +224,21 @@
     font-size: 11px;
     color: var(--text-muted);
     font-family: monospace;
+  }
+
+  .export-section {
+    padding: 40px;
+    max-width: 600px;
+    border-top: 1px solid var(--border-subtle);
+    margin-top: 8px;
+  }
+
+  .export-btn {
+    border-color: var(--accent-sage);
+    color: var(--accent-sage);
+  }
+
+  .export-btn:hover {
+    background: var(--accent-sage-light);
   }
 </style>

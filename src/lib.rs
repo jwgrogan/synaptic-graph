@@ -4,6 +4,7 @@ pub mod db;
 pub mod extraction;
 pub mod ghost;
 pub mod ingestion;
+pub mod markdown;
 pub mod models;
 pub mod redaction;
 pub mod server;
