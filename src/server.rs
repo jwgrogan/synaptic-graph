@@ -596,7 +596,17 @@ impl MemoryGraphServer {
             "depth": format!("{:?}", depth),
             "max_proposals": depth.max_proposals(),
             "instruction": format!(
-                "Extract up to {} key impulses from this session. Focus on decisions made, insights discovered, preferences expressed, patterns observed. For each, call quick_save with type and engagement_level.",
+                concat!(
+                    "Reflect on this session and extract up to {} memories. Prioritize depth over breadth:\n",
+                    "1. PATTERNS (type 'pattern'): How does the user think? What reasoning style did they use? ",
+                    "What made them engage deeply or disengage? Did they approach problems top-down or bottom-up?\n",
+                    "2. INSIGHTS (type 'heuristic'): What would a close friend notice? Any contradictions between ",
+                    "what they said and what they did? Emotional patterns? Growth edges?\n",
+                    "3. DECISIONS (type 'decision'): Major choices made, including the WHY not just the WHAT.\n",
+                    "4. FACTS (type 'observation'): Personal facts shared, but only if genuinely new.\n",
+                    "Do NOT save surface-level summaries of what was discussed. Save what you LEARNED about the person.\n",
+                    "For each, call quick_save with appropriate type and engagement_level."
+                ),
                 depth.max_proposals()
             ),
             "session_stats": {
@@ -1096,20 +1106,48 @@ impl ServerHandler for McpHandler {
         ServerInfo {
             instructions: Some(
                 concat!(
-                    "synaptic-graph: persistent memory for AI conversations.\n\n",
-                    "WHEN TO SAVE (be selective — quality over quantity):\n",
-                    "- Only when the user explicitly says 'remember', 'save', 'don't forget'\n",
-                    "- Major decisions that took real discussion to reach (not every small choice)\n",
-                    "- Personal facts the user shares about themselves (name, location, relationships, career)\n",
-                    "- Strong preferences stated with conviction, not passing opinions\n",
-                    "DO NOT SAVE: routine messages, every opinion, small talk, things in code/git, anything uncertain.\n",
-                    "When in doubt, DON'T save. Less is more. A cluttered memory is worse than a sparse one.\n\n",
+                    "synaptic-graph: deep relational memory — build a true understanding of the user, not a fact sheet.\n\n",
+
+                    "PHILOSOPHY: Think like a close friend, not an executive assistant. A friend remembers how you think, ",
+                    "what you care about, your patterns of behavior, and your blind spots — not just your preferences.\n\n",
+
+                    "THREE LAYERS OF MEMORY:\n",
+                    "Layer 1 (Facts): Personal facts, major decisions, stated preferences. Save when explicitly shared.\n",
+                    "Layer 2 (Patterns): HOW the user thinks and behaves. Observe over time:\n",
+                    "  - Reasoning style (philosophical first? practical first? needs options or wants a recommendation?)\n",
+                    "  - Work patterns (when they're most engaged, how they approach problems, what makes them disengage)\n",
+                    "  - Decision patterns (what factors actually drive their choices, not just what they say drives them)\n",
+                    "  Save with type 'pattern' when you notice a recurring behavior across interactions.\n",
+                    "Layer 3 (Insights): What a close friend would notice:\n",
+                    "  - Contradictions between what they say and what they do (held gently, not judgmentally)\n",
+                    "  - Emotional patterns (topics that consistently energize or drain them)\n",
+                    "  - Growth edges (where they've improved, where they still struggle)\n",
+                    "  - Self-deception (when they say they'll do something they historically don't)\n",
+                    "  Save with type 'heuristic' — these are the most valuable memories.\n\n",
+
+                    "WHEN TO SAVE:\n",
+                    "- Explicit requests ('remember this', 'save that') — always\n",
+                    "- Personal facts shared naturally — yes\n",
+                    "- When you notice a PATTERN forming (not on first occurrence, on second or third) — yes, with type 'pattern'\n",
+                    "- When engagement is notably high or low — note what caused it, with type 'observation'\n",
+                    "- End of substantial sessions — reflect on what you learned about HOW the user thinks, not just WHAT was discussed\n",
+                    "DO NOT save routine messages, every opinion, surface-level observations, or things derivable from code/git.\n",
+                    "1-3 saves per session is right. 0 is fine for short sessions. 10 is too many.\n\n",
+
                     "WHEN TO RECALL:\n",
-                    "- When the user asks 'what do I know about X' or 'remind me'\n",
-                    "- At the start of a session if the user seems to be continuing prior work\n",
-                    "- Do NOT recall on every message — only when context would genuinely help.\n\n",
-                    "Use quick_save (saves and confirms in one call). Set engagement_level to 'high' only for deeply engaged discussions.\n",
-                    "At the end of long sessions, call propose_memories with the session summary to extract key learnings.\n",
+                    "- When the user asks 'what do I know about X'\n",
+                    "- At session start if continuing prior work\n",
+                    "- When you're about to give advice and a pattern memory would make it more personal and specific\n",
+                    "- Example: instead of 'maybe consider the tradeoffs' say 'you tend to go deep on architecture before you're ready — ",
+                    "which usually leads to your best work, but last time with X you said you wished you'd started simpler'\n\n",
+
+                    "ENGAGEMENT SIGNALS:\n",
+                    "- Long, thoughtful messages = high engagement\n",
+                    "- The user arguing with you or pushing back = very high engagement (they care)\n",
+                    "- Short replies, topic-switching = low engagement or discomfort\n",
+                    "- Late-night sessions, weekend work = passionate about the topic\n\n",
+
+                    "Use quick_save for saves. Set engagement_level honestly. At end of long sessions, call propose_memories.\n",
                 )
                     .into(),
             ),
