@@ -65,7 +65,7 @@
   .stat-value {
     font-size: 32px;
     font-weight: 700;
-    color: var(--accent-indigo);
+    color: var(--accent-mauve-deep);
   }
 
   .stat-label {

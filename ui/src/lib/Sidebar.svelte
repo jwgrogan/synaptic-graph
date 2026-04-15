@@ -2,8 +2,8 @@
   import { currentView } from "./stores";
 
   const views = [
-    { id: "galaxy" as const, label: "Galaxy", icon: "\u2726" },
-    { id: "ghosts" as const, label: "External", icon: "\u25CC" },
+    { id: "galaxy" as const, label: "Synaptic Graph", icon: "\u2726" },
+    { id: "ghosts" as const, label: "External Graphs", icon: "\u25CC" },
     { id: "stats" as const, label: "Stats", icon: "\u25A6" },
     { id: "import" as const, label: "Import", icon: "\u2B73" },
   ];
@@ -39,7 +39,7 @@
   .logo {
     font-size: 14px;
     font-weight: 700;
-    color: var(--accent-indigo);
+    color: var(--accent-mauve-deep);
     margin-bottom: 16px;
     opacity: 0.7;
   }
@@ -61,13 +61,13 @@
   }
 
   .nav-item:hover {
-    background: rgba(99, 102, 241, 0.1);
+    background: rgba(201, 169, 184, 0.15);
     color: var(--text-secondary);
   }
 
   .nav-item.active {
-    background: rgba(99, 102, 241, 0.15);
-    color: var(--accent-indigo);
+    background: rgba(201, 169, 184, 0.2);
+    color: var(--accent-mauve);
   }
 
   .nav-icon {

@@ -198,14 +198,14 @@
   .weight-bar {
     width: 80px;
     height: 5px;
-    background: rgba(99, 102, 241, 0.15);
+    background: rgba(201, 169, 184, 0.15);
     border-radius: 3px;
     overflow: hidden;
   }
 
   .weight-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--accent-indigo), var(--accent-violet));
+    background: linear-gradient(90deg, var(--accent-mauve), var(--accent-mauve-deep));
     border-radius: 3px;
   }
 
@@ -217,7 +217,7 @@
   }
 
   .connection-card {
-    background: rgba(99, 102, 241, 0.08);
+    background: rgba(168, 181, 160, 0.1);
     border: 1px solid var(--border-subtle);
     border-radius: 6px;
     padding: 10px;
@@ -228,12 +228,12 @@
   }
 
   .connection-card:hover {
-    background: rgba(99, 102, 241, 0.15);
+    background: rgba(168, 181, 160, 0.18);
   }
 
   .conn-content {
     font-size: 12px;
-    color: var(--accent-indigo);
+    color: var(--accent-sage);
     margin-bottom: 4px;
   }
 

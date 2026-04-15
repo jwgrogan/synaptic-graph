@@ -212,7 +212,7 @@ If no date is known, use [unknown] instead.
     width: 28px;
     height: 28px;
     border-radius: 50%;
-    background: var(--accent-indigo);
+    background: var(--accent-mauve);
     color: white;
     display: flex;
     align-items: center;
@@ -255,7 +255,7 @@ If no date is known, use [unknown] instead.
   }
 
   .copy-btn {
-    background: var(--accent-indigo);
+    background: var(--accent-mauve);
     color: white;
     border: none;
     padding: 8px 16px;
@@ -286,7 +286,7 @@ If no date is known, use [unknown] instead.
   }
 
   .import-btn {
-    background: var(--accent-indigo);
+    background: var(--accent-mauve);
     color: white;
     border: none;
     padding: 10px 20px;
@@ -316,7 +316,7 @@ If no date is known, use [unknown] instead.
 
   .results h3 {
     font-size: 14px;
-    color: var(--accent-indigo);
+    color: var(--accent-mauve);
     margin-bottom: 12px;
   }
 
@@ -325,7 +325,7 @@ If no date is known, use [unknown] instead.
     gap: 8px;
     align-items: center;
     padding: 8px 0;
-    border-bottom: 1px solid rgba(99, 102, 241, 0.08);
+    border-bottom: 1px solid rgba(169, 145, 125, 0.1);
     font-size: 12px;
   }
 
@@ -334,7 +334,7 @@ If no date is known, use [unknown] instead.
   }
 
   .result-type {
-    color: var(--accent-violet);
+    color: var(--accent-mauve-deep);
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -348,7 +348,7 @@ If no date is known, use [unknown] instead.
   }
 
   .result-status {
-    color: var(--accent-teal);
+    color: var(--accent-sage-deep);
     font-size: 11px;
   }
 

@@ -8,6 +8,7 @@ use tauri::State;
 
 pub struct AppState {
     pub db: Mutex<Database>,
+    pub db_path: String,
 }
 
 fn default_db_path() -> PathBuf {
@@ -24,10 +25,11 @@ impl AppState {
             .map(PathBuf::from)
             .unwrap_or_else(|_| default_db_path());
 
-        let db = Database::open(db_path.to_str().unwrap_or("memory.db"))
+        let db_path_str = db_path.to_str().unwrap_or("memory.db").to_string();
+        let db = Database::open(&db_path_str)
             .map_err(|e| format!("Failed to open DB: {}", e))?;
 
-        Ok(Self { db: Mutex::new(db) })
+        Ok(Self { db: Mutex::new(db), db_path: db_path_str })
     }
 }
 
@@ -288,8 +290,8 @@ pub fn quick_save(
 }
 
 #[tauri::command]
-pub fn register_external_graph(
-    state: State<AppState>,
+pub async fn register_external_graph(
+    state: State<'_, AppState>,
     name: String,
     root_path: String,
     source_type: Option<String>,
@@ -303,8 +305,19 @@ pub fn register_external_graph(
         ignore_patterns: vec![".trash".to_string(), ".obsidian".to_string()],
     };
 
-    let db = state.db.lock().map_err(|e| format!("Lock error: {}", e))?;
-    let count = ghost::register_and_scan(&db, &name, &root_path, &stype, &config)?;
+    // Clone values needed inside the blocking task
+    let name_clone = name.clone();
+    let root_path_clone = root_path.clone();
+    let db_path = state.db_path.clone();
+
+    let count = tokio::task::spawn_blocking(move || {
+        let db = Database::open(&db_path)
+            .map_err(|e| format!("Failed to open DB in worker: {}", e))?;
+        ghost::register_and_scan(&db, &name_clone, &root_path_clone, &stype, &config)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+    ?;
 
     Ok(serde_json::json!({
         "name": name,

@@ -102,7 +102,7 @@
   }
 
   .connect-btn {
-    background: var(--accent-indigo);
+    background: var(--accent-mauve);
     color: white;
     border: none;
     padding: 10px 20px;
@@ -124,10 +124,10 @@
 
   .register-result {
     font-size: 13px;
-    color: var(--accent-teal);
+    color: var(--accent-sage-deep);
     margin-bottom: 16px;
     padding: 8px 12px;
-    background: rgba(45, 212, 191, 0.1);
+    background: rgba(168, 181, 160, 0.15);
     border-radius: 6px;
   }
 
@@ -152,7 +152,7 @@
   .ghost-name {
     font-size: 15px;
     font-weight: 600;
-    color: var(--accent-cyan);
+    color: var(--accent-sage-deep);
     margin-bottom: 6px;
   }
 

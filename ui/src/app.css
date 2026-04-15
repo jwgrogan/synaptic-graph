@@ -1,18 +1,20 @@
 :root {
-  --bg-deep: #06060f;
-  --bg-surface: #0d0d1a;
-  --bg-panel: #111127;
-  --border-subtle: rgba(99, 102, 241, 0.15);
-  --text-primary: #e2e8f0;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --accent-indigo: #818cf8;
-  --accent-violet: #a78bfa;
-  --accent-pink: #f472b6;
-  --accent-amber: #fbbf24;
-  --accent-teal: #2dd4bf;
-  --accent-cyan: #67e8f9;
-  --ghost-opacity: 0.35;
+  --bg-deep: #F5F0EB;
+  --bg-surface: #EDE8E1;
+  --bg-panel: #FAFAF7;
+  --border-subtle: rgba(169, 145, 125, 0.2);
+  --text-primary: #3D3531;
+  --text-secondary: #6B5E56;
+  --text-muted: #9B8E85;
+  --accent-mauve: #C9A9B8;
+  --accent-mauve-deep: #A67B8A;
+  --accent-sage: #A8B5A0;
+  --accent-sage-deep: #7A8F6F;
+  --accent-sand: #D4C5A9;
+  --accent-cream: #F0EAE0;
+  --accent-rose: #D4928A;
+  --accent-olive: #8B9B6B;
+  --ghost-opacity: 0.4;
 }
 
 * {
@@ -45,6 +47,6 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border-subtle);
+  background: rgba(169, 145, 125, 0.3);
   border-radius: 3px;
 }

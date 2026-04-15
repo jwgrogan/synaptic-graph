@@ -27,23 +27,24 @@ export function renderNebulae(
 
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
-    const radius = Math.max((maxX - minX) / 2, (maxY - minY) / 2) + 40;
+    const radiusX = Math.max((maxX - minX) / 2, 30) + 40;
+    const radiusY = Math.max((maxY - minY) / 2, 30) + 35;
 
     const g = new Graphics();
-    const color = cluster.color;
 
-    // Multiple concentric circles for glow effect
-    g.circle(cx, cy, radius * 1.5);
-    g.fill({ color, alpha: 0.03 });
+    // Organic blob shape — use cream/sand tones with very low alpha
+    // Multiple overlapping ellipses for an organic feel
+    g.ellipse(cx, cy, radiusX * 1.4, radiusY * 1.3);
+    g.fill({ color: 0xF0EAE0, alpha: 0.04 }); // cream, very faint
 
-    g.circle(cx, cy, radius * 1.0);
-    g.fill({ color, alpha: 0.06 });
+    g.ellipse(cx - radiusX * 0.1, cy + radiusY * 0.05, radiusX * 1.0, radiusY * 0.9);
+    g.fill({ color: 0xD4C5A9, alpha: 0.05 }); // sand
 
-    g.circle(cx, cy, radius * 0.6);
-    g.fill({ color, alpha: 0.1 });
+    g.ellipse(cx + radiusX * 0.05, cy - radiusY * 0.08, radiusX * 0.7, radiusY * 0.65);
+    g.fill({ color: 0xF0EAE0, alpha: 0.06 }); // cream, slightly more
 
-    g.circle(cx, cy, radius * 0.3);
-    g.fill({ color, alpha: 0.15 });
+    g.ellipse(cx, cy, radiusX * 0.35, radiusY * 0.3);
+    g.fill({ color: 0xD4C5A9, alpha: 0.08 }); // sand core
 
     layer.addChild(g);
   }

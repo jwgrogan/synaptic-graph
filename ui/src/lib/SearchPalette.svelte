@@ -104,7 +104,7 @@
   .search-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(0, 0, 0, 0.15);
     display: flex;
     justify-content: center;
     padding-top: 15vh;
@@ -115,7 +115,7 @@
     width: 560px;
     max-height: 500px;
     background: var(--bg-panel);
-    border: 1px solid var(--border-subtle);
+    border: 1px solid var(--accent-mauve);
     border-radius: 12px;
     overflow: hidden;
     display: flex;
@@ -152,7 +152,7 @@
     width: 100%;
     padding: 12px 20px;
     border: none;
-    border-bottom: 1px solid rgba(99, 102, 241, 0.08);
+    border-bottom: 1px solid rgba(169, 145, 125, 0.1);
     background: transparent;
     text-align: left;
     cursor: pointer;
@@ -161,7 +161,7 @@
   }
 
   .result-item:hover {
-    background: rgba(99, 102, 241, 0.1);
+    background: rgba(201, 169, 184, 0.1);
   }
 
   .result-item.ghost {
@@ -185,7 +185,7 @@
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: var(--accent-cyan);
+    color: var(--accent-sage);
     opacity: 0.6;
   }
 </style>
