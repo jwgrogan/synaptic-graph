@@ -43,6 +43,7 @@ impl MemoryGraphServer {
         self.session.lock().unwrap().set_incognito(incognito);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn handle_save_memory(
         &self,
         content: String,
@@ -274,6 +275,7 @@ impl MemoryGraphServer {
         Ok(format!("{{\"dismissed\": \"{}\"}}", id))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn handle_quick_save(
         &self,
         content: String,
