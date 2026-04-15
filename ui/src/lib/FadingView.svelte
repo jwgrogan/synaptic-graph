@@ -144,9 +144,9 @@
   }
 
   h2 {
-    font-family: var(--font-display);
+    font-family: var(--font-body);
     font-size: 20px;
-    font-weight: 400;
+    font-weight: 500;
     color: var(--text-primary);
     margin-bottom: 4px;
   }
@@ -175,7 +175,7 @@
   }
 
   .fading-card {
-    background: var(--bg-surface);
+    background: var(--bg-panel-solid);
     border: 1px solid var(--border-subtle);
     border-left: 3px solid var(--accent-warm);
     border-radius: var(--radius-sm);

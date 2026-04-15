@@ -39,13 +39,12 @@
   }
 
   .logo {
-    font-family: var(--font-display);
-    font-style: italic;
+    font-family: var(--font-body);
     font-size: 20px;
-    font-weight: 300;
-    color: var(--text-primary);
+    font-weight: 600;
+    color: var(--accent-primary);
     margin-bottom: 20px;
-    opacity: 0.7;
+    opacity: 0.9;
     cursor: default;
   }
 

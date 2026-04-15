@@ -14,20 +14,26 @@ export function renderNodes(
     // Parse cluster color
     const hex = node.color || "#8E99A4";
     const color = parseInt(hex.replace("#", ""), 16);
+    const weight = node.impulse.weight;
 
-    // Simple filled circle — that's it
+    // Outer glow: cluster color at low alpha, large radius
+    const glowAlpha = 0.15 + weight * 0.15;
+    g.circle(0, 0, node.radius * 3);
+    g.fill({ color, alpha: glowAlpha });
+
+    // Core circle: cluster color at medium alpha
     g.circle(0, 0, node.radius);
-    g.fill({ color, alpha: 0.75 });
+    g.fill({ color, alpha: 0.5 + weight * 0.5 });
 
-    // Subtle lighter ring on hover-ready nodes
-    g.circle(0, 0, node.radius + 1);
-    g.stroke({ color, width: 0.5, alpha: 0.2 });
+    // Bright white center dot
+    g.circle(0, 0, node.radius * 0.35);
+    g.fill({ color: 0xffffff, alpha: 0.6 + weight * 0.4 });
 
     // Node label (hidden by default, shown on hover)
     const labelStyle = new TextStyle({
       fontFamily: "DM Sans, system-ui, sans-serif",
       fontSize: 10,
-      fill: "#666666",
+      fill: "#c7d2fe",
       wordWrap: true,
       wordWrapWidth: 120,
     });

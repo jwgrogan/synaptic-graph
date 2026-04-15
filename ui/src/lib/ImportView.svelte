@@ -187,9 +187,9 @@ If no date is known, use [unknown] instead.
   }
 
   h2 {
-    font-family: var(--font-display);
+    font-family: var(--font-body);
     font-size: 20px;
-    font-weight: 400;
+    font-weight: 500;
     color: var(--text-primary);
     margin-bottom: 4px;
   }
@@ -210,9 +210,9 @@ If no date is known, use [unknown] instead.
     width: 28px;
     height: 28px;
     border-radius: 50%;
-    border: 1.5px solid var(--border-medium);
+    border: 1.5px solid var(--accent-primary);
     background: transparent;
-    color: var(--text-secondary);
+    color: var(--accent-primary);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -239,7 +239,7 @@ If no date is known, use [unknown] instead.
   }
 
   .prompt-box {
-    background: var(--bg-surface);
+    background: var(--bg-panel-solid);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     padding: 14px;
@@ -282,7 +282,7 @@ If no date is known, use [unknown] instead.
 
   .import-textarea {
     width: 100%;
-    background: var(--bg-surface);
+    background: var(--bg-panel-solid);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     padding: 14px;

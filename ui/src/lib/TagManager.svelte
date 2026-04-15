@@ -126,7 +126,7 @@
   }
 
   .view-title {
-    font-family: var(--font-display);
+    font-family: var(--font-body);
     font-size: 18px;
     font-weight: 400;
     color: var(--text-primary);
@@ -156,7 +156,7 @@
 
   .tag-input {
     flex: 1;
-    background: var(--bg-surface);
+    background: var(--bg-panel-solid);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     padding: 8px 12px;
@@ -218,7 +218,7 @@
 
   .color-swatch.selected {
     border-color: var(--text-primary);
-    box-shadow: 0 0 0 2px var(--bg-surface);
+    box-shadow: 0 0 0 2px var(--bg-deep, #06060f);
   }
 
   .empty-state {

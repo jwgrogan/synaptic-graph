@@ -44,9 +44,9 @@
   }
 
   h2 {
-    font-family: var(--font-display);
+    font-family: var(--font-body);
     font-size: 20px;
-    font-weight: 400;
+    font-weight: 500;
     color: var(--text-primary);
     margin-bottom: 32px;
   }
@@ -58,17 +58,17 @@
   }
 
   .stat-card {
-    background: var(--bg-surface);
+    background: var(--bg-panel-solid);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     padding: 28px 24px;
   }
 
   .stat-value {
-    font-family: var(--font-display);
+    font-family: var(--font-body);
     font-size: 36px;
     font-weight: 300;
-    color: var(--text-primary);
+    color: var(--accent-primary);
     line-height: 1;
   }
 

@@ -109,7 +109,7 @@
   .search-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.08);
+    background: rgba(0, 0, 0, 0.5);
     display: flex;
     justify-content: center;
     padding-top: 15vh;
