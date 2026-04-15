@@ -6,7 +6,9 @@
   import { renderConnections } from "./renderer/connections";
   import { nodes, edges, impulses, connections, selectedNodeId, nodeCount, edgeCount } from "./stores";
   import { getAllImpulses, getAllConnections } from "./api";
+  import { showToast } from "./toastStore";
   import type { Simulation } from "d3-force";
+  import type { GraphEdge } from "./types";
 
   let canvasEl: HTMLCanvasElement;
   let engine: GalaxyEngine;
@@ -18,6 +20,9 @@
   let nodeClickHandler: ((id: string) => void) | undefined;
   let dragNode: SimNode | null = null;
   let isEmpty = true;
+
+  // Connection tooltip state
+  let connectionTooltip: { x: number; y: number; relationship: string; weight: number } | null = null;
 
   function saveScreenshot() {
     if (!engine) return;
@@ -57,10 +62,69 @@
     }
   }
 
-  onMount(async () => {
-    window.addEventListener("navigate-to-node", handleNavigateToNode);
+  // Helper: distance from point to line segment
+  function pointToLineDistance(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+    const dx = x2 - x1, dy = y2 - y1;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq === 0) return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+    let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+    t = Math.max(0, Math.min(1, t));
+    const projX = x1 + t * dx, projY = y1 + t * dy;
+    return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
+  }
 
-    // Load data
+  // Convert screen mouse position to world coordinates
+  function screenToWorld(clientX: number, clientY: number): { wx: number; wy: number } {
+    if (!canvasEl || !engine) return { wx: 0, wy: 0 };
+    const rect = canvasEl.getBoundingClientRect();
+    const scaleX = canvasEl.width / rect.width;
+    const scaleY = canvasEl.height / rect.height;
+    const mouseX = (clientX - rect.left) * scaleX;
+    const mouseY = (clientY - rect.top) * scaleY;
+    const wx = (mouseX - engine.camera.x * window.devicePixelRatio) / (engine.camera.zoom * window.devicePixelRatio);
+    const wy = (mouseY - engine.camera.y * window.devicePixelRatio) / (engine.camera.zoom * window.devicePixelRatio);
+    return { wx, wy };
+  }
+
+  function handleCanvasMousemove(e: MouseEvent) {
+    if (!engine || $edges.length === 0) {
+      connectionTooltip = null;
+      return;
+    }
+
+    const { wx, wy } = screenToWorld(e.clientX, e.clientY);
+
+    // Threshold in world coordinates: 5px / zoom so it feels consistent
+    const threshold = 5 / engine.camera.zoom;
+
+    let closest: GraphEdge | null = null;
+    let closestDist = Infinity;
+    for (const edge of $edges) {
+      const dist = pointToLineDistance(wx, wy, edge.source.x, edge.source.y, edge.target.x, edge.target.y);
+      if (dist < threshold && dist < closestDist) {
+        closest = edge;
+        closestDist = dist;
+      }
+    }
+
+    if (closest) {
+      const rect = canvasEl.getBoundingClientRect();
+      connectionTooltip = {
+        x: e.clientX - rect.left + 12,
+        y: e.clientY - rect.top - 8,
+        relationship: closest.connection.relationship,
+        weight: closest.connection.weight,
+      };
+    } else {
+      connectionTooltip = null;
+    }
+  }
+
+  function handleCanvasMouseleave() {
+    connectionTooltip = null;
+  }
+
+  async function loadAndRender() {
     let impulseData: import("./types").Impulse[] = [];
     let connectionData: import("./types").Connection[] = [];
     try {
@@ -68,7 +132,7 @@
       connectionData = await getAllConnections();
       console.log(`[synaptic-graph] Loaded ${impulseData.length} impulses, ${connectionData.length} connections`);
     } catch (err) {
-      console.error("[synaptic-graph] Failed to load data:", err);
+      showToast("Failed to load graph data: " + (err instanceof Error ? err.message : String(err)));
     }
     impulses.set(impulseData);
     connections.set(connectionData);
@@ -84,8 +148,17 @@
     // Wait a tick for the canvas element to render after isEmpty becomes false
     await new Promise((r) => setTimeout(r, 0));
 
-    engine = new GalaxyEngine();
-    await engine.init(canvasEl);
+    if (!engine) {
+      engine = new GalaxyEngine();
+      await engine.init(canvasEl);
+      setupDrag(canvasEl);
+    }
+
+    // Stop any existing simulation
+    if (simulation) {
+      simulation.stop();
+      cancelAnimationFrame(animFrame);
+    }
 
     // Create live simulation
     const w = canvasEl.parentElement?.clientWidth || 1400;
@@ -108,9 +181,6 @@
     renderNodes(engine.nodeLayer, snap.nodes, nodeClickHandler);
     renderConnections(engine.connectionLayer, snap.edges);
 
-    // Setup drag behavior on canvas
-    setupDrag(canvasEl);
-
     // Animation loop — re-render every frame while simulation is active
     function tick() {
       if (!simulation) return;
@@ -128,6 +198,16 @@
         renderConnections(engine.connectionLayer, snap.edges);
       }
 
+      // Zoom-dependent label visibility
+      const showAllLabels = engine.camera.zoom > 1.5;
+      for (const child of engine.nodeLayer.children) {
+        const lbl = child.children?.find((c: any) => c.label === "nodelabel");
+        if (lbl && showAllLabels) {
+          lbl.alpha = 1;
+        }
+        // Don't hide labels here — hover handler manages that when zoomed out
+      }
+
       // Keep requesting frames while simulation has energy
       if (simulation.alpha() > 0.001) {
         animFrame = requestAnimationFrame(tick);
@@ -143,6 +223,20 @@
 
     // Initial render frame
     animFrame = requestAnimationFrame(tick);
+  }
+
+  async function refreshGraph() {
+    try {
+      await loadAndRender();
+      showToast("Graph refreshed", "success");
+    } catch (err) {
+      showToast("Failed to refresh graph: " + (err instanceof Error ? err.message : String(err)));
+    }
+  }
+
+  onMount(async () => {
+    window.addEventListener("navigate-to-node", handleNavigateToNode);
+    await loadAndRender();
   });
 
   function setupDrag(canvas: HTMLCanvasElement) {
@@ -232,24 +326,43 @@
   </div>
 </div>
 {:else}
-<canvas bind:this={canvasEl} class="galaxy-canvas"></canvas>
-<button class="screenshot-btn" on:click={saveScreenshot} title="Save screenshot">
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-    <circle cx="8.5" cy="8.5" r="1.5"/>
-    <polyline points="21 15 16 10 5 21"/>
-  </svg>
-</button>
-{#if $nodeCount > 0}
-<div class="graph-stats">
-  <span>{$nodeCount} nodes</span>
-  <span class="dot">&middot;</span>
-  <span>{$edgeCount} connections</span>
+<!-- svelte-ignore a11y-no-static-element-interactions -->
+<div class="galaxy-wrapper" on:mousemove={handleCanvasMousemove} on:mouseleave={handleCanvasMouseleave}>
+  <canvas bind:this={canvasEl} class="galaxy-canvas"></canvas>
+
+  <button class="refresh-btn" on:click={refreshGraph} title="Refresh graph">&#8635;</button>
+
+  <button class="screenshot-btn" on:click={saveScreenshot} title="Save screenshot">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+      <circle cx="8.5" cy="8.5" r="1.5"/>
+      <polyline points="21 15 16 10 5 21"/>
+    </svg>
+  </button>
+
+  {#if connectionTooltip}
+  <div class="connection-tooltip" style="left: {connectionTooltip.x}px; top: {connectionTooltip.y}px">
+    {connectionTooltip.relationship} &middot; {connectionTooltip.weight.toFixed(2)}
+  </div>
+  {/if}
+
+  {#if $nodeCount > 0}
+  <div class="graph-stats">
+    <span>{$nodeCount} nodes</span>
+    <span class="dot">&middot;</span>
+    <span>{$edgeCount} connections</span>
+  </div>
+  {/if}
 </div>
-{/if}
 {/if}
 
 <style>
+  .galaxy-wrapper {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
   .galaxy-canvas {
     width: 100%;
     height: 100%;
@@ -328,6 +441,35 @@
     opacity: 0.5;
   }
 
+  .refresh-btn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-panel);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: var(--text-muted);
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+    z-index: 10;
+    padding: 0;
+    line-height: 1;
+  }
+
+  .refresh-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--border-medium);
+    background: var(--bg-hover);
+  }
+
   .screenshot-btn {
     position: absolute;
     bottom: 12px;
@@ -352,5 +494,19 @@
     background: var(--bg-hover);
     color: var(--text-primary);
     border-color: var(--border-medium);
+  }
+
+  .connection-tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--bg-panel-solid);
+    color: var(--text-secondary);
+    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-sm);
+    white-space: nowrap;
+    z-index: 20;
   }
 </style>
