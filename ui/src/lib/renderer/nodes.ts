@@ -10,53 +10,45 @@ export function renderNodes(
 
   for (const node of nodes) {
     const g = new Graphics();
-    const weight = node.impulse.weight;
 
-    // Parse cluster color to get RGB values
-    const colorHex = node.color || "#8E99A4";
-    const cr = parseInt(colorHex.slice(1, 3), 16);
-    const cg = parseInt(colorHex.slice(3, 5), 16);
-    const cb = parseInt(colorHex.slice(5, 7), 16);
-    const nodeColor = (cr << 16) | (cg << 8) | cb;
+    // Parse cluster color
+    const hex = node.color || "#8E99A4";
+    const color = parseInt(hex.replace("#", ""), 16);
 
-    const radius = node.radius;
+    // Simple filled circle — that's it
+    g.circle(0, 0, node.radius);
+    g.fill({ color, alpha: 0.75 });
 
-    // Subtle drop shadow (darker circle offset slightly below)
-    g.circle(0, 1.5, radius);
-    g.fill({ color: 0x000000, alpha: 0.06 });
-
-    // Main node circle — clean filled circle with muted cluster color
-    g.circle(0, 0, radius);
-    g.fill({ color: nodeColor, alpha: 0.35 + weight * 0.35 });
-
-    // Bright center dot for high-weight nodes only
-    if (weight > 0.6) {
-      g.circle(0, 0, radius * 0.25);
-      g.fill({ color: 0xFFFFFF, alpha: 0.4 + (weight - 0.6) * 0.5 });
-    }
+    // Subtle lighter ring on hover-ready nodes
+    g.circle(0, 0, node.radius + 1);
+    g.stroke({ color, width: 0.5, alpha: 0.2 });
 
     g.x = node.x;
     g.y = node.y;
 
-    // Hit area and interactivity
-    const hitRadius = radius * 2.2;
-    g.hitArea = new Circle(0, 0, hitRadius);
+    // Interactivity
+    g.hitArea = new Circle(0, 0, node.radius + 8);
     g.eventMode = "static";
     g.cursor = "pointer";
     g.label = node.impulse.id;
 
     if (onClick) {
-      g.on("pointerdown", () => {
-        onClick(node.impulse.id);
-      });
+      g.on("pointerdown", () => onClick(node.impulse.id));
     }
 
     layer.addChild(g);
   }
 }
 
+export function updateNodePositions(layer: Container, nodes: GraphNode[]) {
+  const children = layer.children;
+  for (let i = 0; i < children.length && i < nodes.length; i++) {
+    children[i].x = nodes[i].x;
+    children[i].y = nodes[i].y;
+  }
+}
+
 export function updateNodes(layer: Container, nodes: GraphNode[]) {
-  // For now, just re-render. Optimize later with sprite pooling.
   renderNodes(layer, nodes);
 }
 

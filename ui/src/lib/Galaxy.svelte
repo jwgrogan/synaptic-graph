@@ -1,13 +1,21 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { GalaxyEngine } from "./renderer/engine";
-  import { computeLayout } from "./renderer/layout";
-  import { detectClusters, buildClusterInfo } from "./renderer/clusters";
+  import { createSimulation, snapshotGraph, type SimNode } from "./renderer/layout";
+  import { renderNodes, updateNodePositions } from "./renderer/nodes";
+  import { renderConnections } from "./renderer/connections";
   import { nodes, edges, impulses, connections, selectedNodeId } from "./stores";
   import { getAllImpulses, getAllConnections } from "./api";
+  import type { Simulation } from "d3-force";
 
   let canvasEl: HTMLCanvasElement;
   let engine: GalaxyEngine;
+  let simulation: Simulation<SimNode, any> | null = null;
+  let animFrame: number;
+  let simNodes: SimNode[] = [];
+  let simLinks: any[] = [];
+  let nodeClickHandler: ((id: string) => void) | undefined;
+  let dragNode: SimNode | null = null;
 
   onMount(async () => {
     engine = new GalaxyEngine();
@@ -27,33 +35,133 @@
     connections.set(connectionData);
 
     if (impulseData.length === 0) {
-      console.log("[synaptic-graph] No impulses found — galaxy will be empty");
+      console.log("[synaptic-graph] No impulses found");
       return;
     }
 
-    // Compute layout
-    const layout = computeLayout(impulseData, connectionData);
-    nodes.set(layout.nodes);
-    edges.set(layout.edges);
-    console.log(`[synaptic-graph] Layout computed: ${layout.nodes.length} nodes at positions`, layout.nodes.map(n => ({ id: n.impulse.id.slice(0,8), x: Math.round(n.x), y: Math.round(n.y) })));
+    // Create live simulation
+    const w = canvasEl.parentElement?.clientWidth || 1400;
+    const h = canvasEl.parentElement?.clientHeight || 900;
+    const sim = createSimulation(impulseData, connectionData, w, h);
+    simulation = sim.simulation;
+    simNodes = sim.simNodes;
+    simLinks = sim.simLinks;
 
-    // Build nebula cluster info
-    const nodePositions = new Map<string, { x: number; y: number }>();
-    for (const node of layout.nodes) {
-      nodePositions.set(node.impulse.id, { x: node.x, y: node.y });
+    // Click handler
+    nodeClickHandler = (id: string) => {
+      console.log(`[synaptic-graph] Node clicked: ${id}`);
+      selectedNodeId.set(id);
+    };
+
+    // Initial render
+    const snap = snapshotGraph(simNodes, simLinks);
+    nodes.set(snap.nodes);
+    edges.set(snap.edges);
+    renderNodes(engine.nodeLayer, snap.nodes, nodeClickHandler);
+    renderConnections(engine.connectionLayer, snap.edges);
+
+    // Setup drag behavior on canvas
+    setupDrag(canvasEl);
+
+    // Animation loop — re-render every frame while simulation is active
+    function tick() {
+      if (!simulation) return;
+
+      const snap = snapshotGraph(simNodes, simLinks);
+      nodes.set(snap.nodes);
+      edges.set(snap.edges);
+
+      // Update positions efficiently
+      updateNodePositions(engine.nodeLayer, snap.nodes);
+      renderConnections(engine.connectionLayer, snap.edges);
+
+      // Keep requesting frames while simulation has energy
+      if (simulation.alpha() > 0.001) {
+        animFrame = requestAnimationFrame(tick);
+      }
     }
-    const nodeToCluster = detectClusters(impulseData, connectionData);
-    const clusterInfo = buildClusterInfo(nodeToCluster, nodePositions);
 
-    // Render with click handler
-    engine.renderGraph(layout.nodes, layout.edges, (nodeId: string) => {
-      console.log(`[synaptic-graph] Node clicked: ${nodeId}`);
-      selectedNodeId.set(nodeId);
+    // Listen for simulation ticks
+    simulation.on("tick", () => {
+      // Just request a render frame
+      cancelAnimationFrame(animFrame);
+      animFrame = requestAnimationFrame(tick);
     });
-    engine.renderNebulae(clusterInfo, nodePositions);
+
+    // Initial render frame
+    animFrame = requestAnimationFrame(tick);
   });
 
+  function setupDrag(canvas: HTMLCanvasElement) {
+    let isDraggingNode = false;
+
+    canvas.addEventListener("mousedown", (e) => {
+      if (!simulation) return;
+
+      // Find if we clicked a node
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const mouseX = (e.clientX - rect.left) * scaleX;
+      const mouseY = (e.clientY - rect.top) * scaleY;
+
+      // Transform to world coordinates
+      const worldX = (mouseX - engine.camera.x * window.devicePixelRatio) / (engine.camera.zoom * window.devicePixelRatio);
+      const worldY = (mouseY - engine.camera.y * window.devicePixelRatio) / (engine.camera.zoom * window.devicePixelRatio);
+
+      // Find closest node
+      let closest: SimNode | null = null;
+      let closestDist = Infinity;
+      for (const n of simNodes) {
+        const dx = (n.x ?? 0) - worldX;
+        const dy = (n.y ?? 0) - worldY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < n.radius + 8 && dist < closestDist) {
+          closest = n;
+          closestDist = dist;
+        }
+      }
+
+      if (closest) {
+        isDraggingNode = true;
+        dragNode = closest;
+        dragNode.fx = dragNode.x;
+        dragNode.fy = dragNode.y;
+        simulation!.alphaTarget(0.3).restart();
+        e.stopPropagation();
+      }
+    });
+
+    canvas.addEventListener("mousemove", (e) => {
+      if (!isDraggingNode || !dragNode || !simulation) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const mouseX = (e.clientX - rect.left) * scaleX;
+      const mouseY = (e.clientY - rect.top) * scaleY;
+
+      const worldX = (mouseX - engine.camera.x * window.devicePixelRatio) / (engine.camera.zoom * window.devicePixelRatio);
+      const worldY = (mouseY - engine.camera.y * window.devicePixelRatio) / (engine.camera.zoom * window.devicePixelRatio);
+
+      dragNode.fx = worldX;
+      dragNode.fy = worldY;
+    });
+
+    canvas.addEventListener("mouseup", () => {
+      if (isDraggingNode && dragNode) {
+        dragNode.fx = null;
+        dragNode.fy = null;
+        simulation?.alphaTarget(0);
+        isDraggingNode = false;
+        dragNode = null;
+      }
+    });
+  }
+
   onDestroy(() => {
+    cancelAnimationFrame(animFrame);
+    simulation?.stop();
     engine?.destroy();
   });
 </script>
