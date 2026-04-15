@@ -12,11 +12,21 @@
   let engine: GalaxyEngine;
   let simulation: Simulation<SimNode, any> | null = null;
   let animFrame: number;
+  let frameCount = 0;
   let simNodes: SimNode[] = [];
   let simLinks: any[] = [];
   let nodeClickHandler: ((id: string) => void) | undefined;
   let dragNode: SimNode | null = null;
   let isEmpty = true;
+
+  function saveScreenshot() {
+    if (!engine) return;
+    const canvas = engine.app.canvas as HTMLCanvasElement;
+    const link = document.createElement("a");
+    link.download = "synaptic-graph.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  }
 
   // Selected node visual state
   $: if (engine && $selectedNodeId) {
@@ -104,6 +114,7 @@
     // Animation loop — re-render every frame while simulation is active
     function tick() {
       if (!simulation) return;
+      frameCount++;
 
       const snap = snapshotGraph(simNodes, simLinks);
       nodes.set(snap.nodes);
@@ -111,7 +122,11 @@
 
       // Update positions efficiently
       updateNodePositions(engine.nodeLayer, snap.nodes);
-      renderConnections(engine.connectionLayer, snap.edges);
+
+      // Only re-render connections every 3 frames (they're expensive)
+      if (frameCount % 3 === 0) {
+        renderConnections(engine.connectionLayer, snap.edges);
+      }
 
       // Keep requesting frames while simulation has energy
       if (simulation.alpha() > 0.001) {
@@ -218,6 +233,13 @@
 </div>
 {:else}
 <canvas bind:this={canvasEl} class="galaxy-canvas"></canvas>
+<button class="screenshot-btn" on:click={saveScreenshot} title="Save screenshot">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+    <circle cx="8.5" cy="8.5" r="1.5"/>
+    <polyline points="21 15 16 10 5 21"/>
+  </svg>
+</button>
 {#if $nodeCount > 0}
 <div class="graph-stats">
   <span>{$nodeCount} nodes</span>
@@ -304,5 +326,31 @@
 
   .graph-stats .dot {
     opacity: 0.5;
+  }
+
+  .screenshot-btn {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+    background: var(--bg-panel);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+    z-index: 10;
+  }
+
+  .screenshot-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--border-medium);
   }
 </style>
