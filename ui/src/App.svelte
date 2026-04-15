@@ -5,6 +5,7 @@
   import StatsView from "./lib/StatsView.svelte";
   import GhostList from "./lib/GhostList.svelte";
   import ImportView from "./lib/ImportView.svelte";
+  import FadingView from "./lib/FadingView.svelte";
   import SearchPalette from "./lib/SearchPalette.svelte";
   import { currentView } from "./lib/stores";
 </script>
@@ -20,6 +21,8 @@
       <StatsView />
     {:else if $currentView === "ghosts"}
       <GhostList />
+    {:else if $currentView === "fading"}
+      <FadingView />
     {:else if $currentView === "import"}
       <ImportView />
     {/if}

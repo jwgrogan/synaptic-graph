@@ -4,6 +4,7 @@
   const views = [
     { id: "galaxy" as const, label: "Synaptic Graph", icon: "\u2726" },
     { id: "ghosts" as const, label: "External Graphs", icon: "\u25CC" },
+    { id: "fading" as const, label: "Fading", icon: "\u25CB" },
     { id: "stats" as const, label: "Stats", icon: "\u25A6" },
     { id: "import" as const, label: "Import", icon: "\u2B73" },
   ];
