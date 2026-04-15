@@ -4,7 +4,7 @@
   import { createSimulation, snapshotGraph, type SimNode } from "./renderer/layout";
   import { renderNodes, updateNodePositions } from "./renderer/nodes";
   import { renderConnections } from "./renderer/connections";
-  import { nodes, edges, impulses, connections, selectedNodeId } from "./stores";
+  import { nodes, edges, impulses, connections, selectedNodeId, nodeCount, edgeCount } from "./stores";
   import { getAllImpulses, getAllConnections } from "./api";
   import type { Simulation } from "d3-force";
 
@@ -16,10 +16,39 @@
   let simLinks: any[] = [];
   let nodeClickHandler: ((id: string) => void) | undefined;
   let dragNode: SimNode | null = null;
+  let isEmpty = true;
+
+  // Selected node visual state
+  $: if (engine && $selectedNodeId) {
+    for (const child of engine.nodeLayer.children) {
+      if (child.label === $selectedNodeId) {
+        child.scale.set(1.3);
+        child.alpha = 1.0;
+      } else {
+        child.alpha = 0.4;
+      }
+    }
+  } else if (engine) {
+    for (const child of engine.nodeLayer.children) {
+      child.scale.set(1.0);
+      child.alpha = 1.0;
+    }
+  }
+
+  function handleNavigateToNode(e: Event) {
+    const detail = (e as CustomEvent).detail;
+    const nodeId = detail.id;
+    selectedNodeId.set(nodeId);
+    const node = $nodes.find(n => n.impulse.id === nodeId);
+    if (node && engine) {
+      const w = canvasEl.parentElement?.clientWidth || 1400;
+      const h = canvasEl.parentElement?.clientHeight || 900;
+      engine.zoomToNode(node.x, node.y, w, h);
+    }
+  }
 
   onMount(async () => {
-    engine = new GalaxyEngine();
-    await engine.init(canvasEl);
+    window.addEventListener("navigate-to-node", handleNavigateToNode);
 
     // Load data
     let impulseData: import("./types").Impulse[] = [];
@@ -36,8 +65,17 @@
 
     if (impulseData.length === 0) {
       console.log("[synaptic-graph] No impulses found");
+      isEmpty = true;
       return;
     }
+
+    isEmpty = false;
+
+    // Wait a tick for the canvas element to render after isEmpty becomes false
+    await new Promise((r) => setTimeout(r, 0));
+
+    engine = new GalaxyEngine();
+    await engine.init(canvasEl);
 
     // Create live simulation
     const w = canvasEl.parentElement?.clientWidth || 1400;
@@ -163,15 +201,108 @@
     cancelAnimationFrame(animFrame);
     simulation?.stop();
     engine?.destroy();
+    window.removeEventListener("navigate-to-node", handleNavigateToNode);
   });
 </script>
 
+{#if isEmpty}
+<div class="empty-state">
+  <div class="empty-icon">&#x2B21;</div>
+  <h2>Your memory graph is empty</h2>
+  <p>Start a conversation with an AI assistant that has Synaptic Graph connected. Memories will appear here as you save them.</p>
+  <div class="empty-hints">
+    <div class="hint">Say <strong>"remember this"</strong> to save a memory</div>
+    <div class="hint">Use <strong>Cmd+K</strong> to search your memories</div>
+    <div class="hint">Go to <strong>Import</strong> to bring memories from other providers</div>
+  </div>
+</div>
+{:else}
 <canvas bind:this={canvasEl} class="galaxy-canvas"></canvas>
+{#if $nodeCount > 0}
+<div class="graph-stats">
+  <span>{$nodeCount} nodes</span>
+  <span class="dot">&middot;</span>
+  <span>{$edgeCount} connections</span>
+</div>
+{/if}
+{/if}
 
 <style>
   .galaxy-canvas {
     width: 100%;
     height: 100%;
     display: block;
+  }
+
+  .empty-state {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    text-align: center;
+    padding: 40px;
+  }
+
+  .empty-icon {
+    font-size: 56px;
+    color: var(--accent-primary);
+    line-height: 1;
+    margin-bottom: 4px;
+    opacity: 0.8;
+  }
+
+  .empty-state h2 {
+    font-size: 18px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  .empty-state p {
+    font-size: 13px;
+    color: var(--text-muted);
+    max-width: 380px;
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  .empty-hints {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 20px;
+  }
+
+  .hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 6px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface);
+  }
+
+  .hint strong {
+    color: var(--text-secondary);
+  }
+
+  .graph-stats {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    font-size: 10px;
+    color: var(--text-muted);
+    opacity: 0.7;
+    display: flex;
+    gap: 6px;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .graph-stats .dot {
+    opacity: 0.5;
   }
 </style>

@@ -38,7 +38,7 @@
   }
 
   function navigateTo(id: string) {
-    selectedNodeId.set(id);
+    window.dispatchEvent(new CustomEvent("navigate-to-node", { detail: { id } }));
   }
 
   async function unlinkConnection(connectionId: string) {
@@ -196,11 +196,13 @@
     overflow-y: auto;
     z-index: 10;
     transform: translateX(100%);
-    transition: transform var(--transition-medium);
+    opacity: 0;
+    transition: transform 250ms ease, opacity 250ms ease;
   }
 
   .detail-panel.visible {
     transform: translateX(0);
+    opacity: 1;
   }
 
   .close-btn {

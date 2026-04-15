@@ -118,6 +118,14 @@ export class GalaxyEngine {
     this.applyCameraTransform();
   }
 
+  zoomToNode(x: number, y: number, screenWidth: number, screenHeight: number) {
+    const targetZoom = 2.0;
+    this.camera.zoom = targetZoom;
+    this.camera.x = screenWidth / 2 - x * targetZoom;
+    this.camera.y = screenHeight / 2 - y * targetZoom;
+    this.applyCameraTransform();
+  }
+
   renderNebulae(
     clusters: Cluster[],
     nodePositions: Map<string, { x: number; y: number }>

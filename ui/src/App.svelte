@@ -9,8 +9,27 @@
   import SearchPalette from "./lib/SearchPalette.svelte";
   import FilterBar from "./lib/FilterBar.svelte";
   import TagManager from "./lib/TagManager.svelte";
-  import { currentView } from "./lib/stores";
+  import Toasts from "./lib/Toasts.svelte";
+  import { currentView, selectedNodeId, searchOpen } from "./lib/stores";
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      selectedNodeId.set(null);
+      searchOpen.set(false);
+    }
+    if (e.key === "/" && !isInputFocused()) {
+      e.preventDefault();
+      searchOpen.set(true);
+    }
+  }
+
+  function isInputFocused(): boolean {
+    const el = document.activeElement;
+    return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+  }
 </script>
+
+<svelte:window on:keydown={handleKeydown} />
 
 <div class="app-layout">
   <Sidebar />
@@ -35,6 +54,7 @@
 </div>
 
 <SearchPalette />
+<Toasts />
 
 <style>
   .app-layout {

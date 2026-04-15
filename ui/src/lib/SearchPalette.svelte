@@ -114,6 +114,12 @@
     justify-content: center;
     padding-top: 15vh;
     z-index: 100;
+    animation: overlay-fade-in 200ms ease forwards;
+  }
+
+  @keyframes overlay-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   .search-palette {
@@ -128,6 +134,12 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    animation: palette-scale-in 200ms ease forwards;
+  }
+
+  @keyframes palette-scale-in {
+    from { transform: scale(0.95); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
   }
 
   .search-input-wrapper {
