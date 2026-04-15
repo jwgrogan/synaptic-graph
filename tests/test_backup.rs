@@ -22,6 +22,8 @@ fn insert_sample_impulse(db: &Database, content: &str) -> Impulse {
         source_signals: vec![],
         source_type: SourceType::ExplicitSave,
         source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     };
     db.insert_impulse(&input).unwrap()
 }

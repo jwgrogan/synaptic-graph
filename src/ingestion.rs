@@ -52,10 +52,82 @@ pub fn explicit_save(
         source_signals,
         source_type: SourceType::ExplicitSave,
         source_ref: source_ref.to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     };
 
     db.insert_impulse(&new_impulse)
         .map_err(|e| format!("Failed to insert impulse: {}", e))
+}
+
+/// Save content as a candidate impulse with source provider info.
+#[allow(clippy::too_many_arguments)]
+pub fn explicit_save_with_provider(
+    db: &Database,
+    content: &str,
+    impulse_type: ImpulseType,
+    emotional_valence: EmotionalValence,
+    engagement_level: EngagementLevel,
+    source_signals: Vec<String>,
+    source_ref: &str,
+    source_provider: &str,
+    source_account: &str,
+) -> Result<Impulse, String> {
+    if content.trim().is_empty() {
+        return Err("Content must not be empty".to_string());
+    }
+
+    let redacted = redaction::redact(content);
+
+    let new_impulse = NewImpulse {
+        content: redacted.clean_content,
+        impulse_type,
+        initial_weight: WEIGHT_EXPLICIT_SAVE,
+        emotional_valence,
+        engagement_level,
+        source_signals,
+        source_type: SourceType::ExplicitSave,
+        source_ref: source_ref.to_string(),
+        source_provider: source_provider.to_string(),
+        source_account: source_account.to_string(),
+    };
+
+    db.insert_impulse(&new_impulse)
+        .map_err(|e| format!("Failed to insert impulse: {}", e))
+}
+
+/// Save content and immediately confirm it with source provider info.
+#[allow(clippy::too_many_arguments)]
+pub fn save_and_confirm_with_provider(
+    db: &Database,
+    content: &str,
+    impulse_type: ImpulseType,
+    emotional_valence: EmotionalValence,
+    engagement_level: EngagementLevel,
+    source_signals: Vec<String>,
+    source_ref: &str,
+    source_provider: &str,
+    source_account: &str,
+) -> Result<Impulse, String> {
+    let impulse = explicit_save_with_provider(
+        db,
+        content,
+        impulse_type,
+        emotional_valence,
+        engagement_level,
+        source_signals,
+        source_ref,
+        source_provider,
+        source_account,
+    )?;
+
+    db.confirm_impulse(&impulse.id)
+        .map_err(|e| format!("Failed to confirm impulse: {}", e))?;
+
+    let _ = auto_link(db, &impulse.id);
+
+    db.get_impulse(&impulse.id)
+        .map_err(|e| format!("Failed to retrieve confirmed impulse: {}", e))
 }
 
 /// Save content as a candidate impulse and also insert connections.

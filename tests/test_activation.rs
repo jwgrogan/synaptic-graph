@@ -19,6 +19,8 @@ fn seed_graph(db: &synaptic_graph::db::Database) -> (String, String, String) {
             source_signals: vec![],
             source_type: SourceType::ExplicitSave,
             source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
         })
         .unwrap();
     db.confirm_impulse(&a.id).unwrap();
@@ -33,6 +35,8 @@ fn seed_graph(db: &synaptic_graph::db::Database) -> (String, String, String) {
             source_signals: vec![],
             source_type: SourceType::ExplicitSave,
             source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
         })
         .unwrap();
     db.confirm_impulse(&b.id).unwrap();
@@ -47,6 +51,8 @@ fn seed_graph(db: &synaptic_graph::db::Database) -> (String, String, String) {
             source_signals: vec![],
             source_type: SourceType::ExplicitSave,
             source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
         })
         .unwrap();
     db.confirm_impulse(&c.id).unwrap();
@@ -213,6 +219,8 @@ fn test_high_engagement_amplifies_propagation() {
             source_signals: vec![],
             source_type: SourceType::ExplicitSave,
             source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
         })
         .unwrap();
     db.confirm_impulse(&a.id).unwrap();
@@ -227,6 +235,8 @@ fn test_high_engagement_amplifies_propagation() {
             source_signals: vec![],
             source_type: SourceType::ExplicitSave,
             source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
         })
         .unwrap();
     db.confirm_impulse(&b_high.id).unwrap();
@@ -241,6 +251,8 @@ fn test_high_engagement_amplifies_propagation() {
             source_signals: vec![],
             source_type: SourceType::ExplicitSave,
             source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
         })
         .unwrap();
     db.confirm_impulse(&b_low.id).unwrap();
@@ -339,6 +351,8 @@ fn test_activation_includes_ghost_nodes() {
             source_signals: vec![],
             source_type: SourceType::ExplicitSave,
             source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
         })
         .unwrap();
     db.confirm_impulse(&imp.id).unwrap();
@@ -529,6 +543,8 @@ fn test_activation_at_scale_100_nodes() {
                 source_signals: vec![],
                 source_type: SourceType::ExplicitSave,
                 source_ref: "test".to_string(),
+                source_provider: "unknown".to_string(),
+                source_account: String::new(),
             })
             .unwrap();
         db.confirm_impulse(&impulse.id).unwrap();
@@ -583,6 +599,8 @@ fn test_activation_at_scale_1000_nodes() {
                 source_signals: vec![],
                 source_type: SourceType::ExplicitSave,
                 source_ref: "test".to_string(),
+                source_provider: "unknown".to_string(),
+                source_account: String::new(),
             })
             .unwrap();
         db.confirm_impulse(&impulse.id).unwrap();

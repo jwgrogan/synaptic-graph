@@ -51,6 +51,8 @@ pub fn pull_ghost_content(
                 source_signals: vec![format!("ghost_pull:{}", ghost_node.source_graph)],
                 source_type: SourceType::PullThrough,
                 source_ref: format!("{}:{}", ghost_node.source_graph, ghost_node.external_ref),
+                source_provider: "ghost".to_string(),
+                source_account: ghost_node.source_graph.clone(),
             };
 
             let impulse = db.insert_impulse(&input)

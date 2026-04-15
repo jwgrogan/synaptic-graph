@@ -63,6 +63,8 @@ pub struct UiImpulse {
     pub status: String,
     pub created_at: String,
     pub last_accessed_at: String,
+    pub source_provider: String,
+    pub source_account: String,
 }
 
 impl From<Impulse> for UiImpulse {
@@ -80,6 +82,8 @@ impl From<Impulse> for UiImpulse {
             status: i.status.as_str().to_string(),
             created_at: i.created_at.to_rfc3339(),
             last_accessed_at: i.last_accessed_at.to_rfc3339(),
+            source_provider: i.source_provider,
+            source_account: i.source_account,
         }
     }
 }

@@ -206,6 +206,8 @@ pub fn import_snapshot(
                     source_signals: remote_impulse.source_signals.clone(),
                     source_type: remote_impulse.source_type,
                     source_ref: remote_impulse.source_ref.clone(),
+                    source_provider: remote_impulse.source_provider.clone(),
+                    source_account: remote_impulse.source_account.clone(),
                 };
                 local_db
                     .insert_impulse_with_id(&remote_impulse.id, &new_input)

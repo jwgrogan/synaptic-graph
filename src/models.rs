@@ -171,6 +171,8 @@ pub struct Impulse {
     pub source_type: SourceType,
     pub source_ref: String,
     pub status: ImpulseStatus,
+    pub source_provider: String,
+    pub source_account: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,6 +199,8 @@ pub struct NewImpulse {
     pub source_signals: Vec<String>,
     pub source_type: SourceType,
     pub source_ref: String,
+    pub source_provider: String,
+    pub source_account: String,
 }
 
 #[derive(Debug, Clone)]
@@ -205,6 +209,21 @@ pub struct NewConnection {
     pub target_id: String,
     pub weight: f64,
     pub relationship: String,
+}
+
+// === Tag Types ===
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tag {
+    pub name: String,
+    pub color: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewTag {
+    pub name: String,
+    pub color: String,
 }
 
 // === Ghost Graph Types ===

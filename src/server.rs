@@ -50,6 +50,8 @@ impl MemoryGraphServer {
         emotional_valence: Option<String>,
         engagement_level: Option<String>,
         source_ref: Option<String>,
+        source_provider: Option<String>,
+        source_account: Option<String>,
     ) -> Result<String, String> {
         if self.is_incognito() {
             return Err("Cannot save memory in incognito mode".to_string());
@@ -71,9 +73,11 @@ impl MemoryGraphServer {
             .ok_or("Invalid engagement level")?;
 
         let sref = source_ref.unwrap_or_default();
+        let provider = source_provider.unwrap_or_else(|| "unknown".to_string());
+        let account = source_account.unwrap_or_default();
 
         let db = self.db.lock().unwrap();
-        let impulse = ingestion::explicit_save(
+        let impulse = ingestion::explicit_save_with_provider(
             &db,
             &content,
             itype,
@@ -81,6 +85,8 @@ impl MemoryGraphServer {
             engagement,
             vec![],
             &sref,
+            &provider,
+            &account,
         )?;
 
         serde_json::to_string_pretty(&impulse).map_err(|e| format!("Serialization error: {}", e))
@@ -144,6 +150,8 @@ impl MemoryGraphServer {
             .get_connections_for_node(&id)
             .map_err(|e| format!("Connection lookup failed: {}", e))?;
 
+        let tags = db.get_tags_for_impulse(&id).unwrap_or_default();
+
         let response = serde_json::json!({
             "id": impulse.id,
             "content": impulse.content,
@@ -157,7 +165,10 @@ impl MemoryGraphServer {
             "last_accessed_at": impulse.last_accessed_at.to_rfc3339(),
             "source_type": impulse.source_type,
             "source_ref": impulse.source_ref,
+            "source_provider": impulse.source_provider,
+            "source_account": impulse.source_account,
             "status": impulse.status,
+            "tags": tags.iter().map(|t| serde_json::json!({"name": t.name, "color": t.color})).collect::<Vec<_>>(),
             "connections": connections.iter().map(|c| serde_json::json!({
                 "id": c.id,
                 "source_id": c.source_id,
@@ -270,6 +281,8 @@ impl MemoryGraphServer {
         emotional_valence: Option<String>,
         engagement_level: Option<String>,
         source_ref: Option<String>,
+        source_provider: Option<String>,
+        source_account: Option<String>,
     ) -> Result<String, String> {
         if self.is_incognito() {
             return Err("Cannot save memory in incognito mode".to_string());
@@ -291,9 +304,11 @@ impl MemoryGraphServer {
             .ok_or("Invalid engagement level")?;
 
         let sref = source_ref.unwrap_or_default();
+        let provider = source_provider.unwrap_or_else(|| "unknown".to_string());
+        let account = source_account.unwrap_or_default();
 
         let db = self.db.lock().unwrap();
-        let impulse = ingestion::save_and_confirm(
+        let impulse = ingestion::save_and_confirm_with_provider(
             &db,
             &content,
             itype,
@@ -301,6 +316,8 @@ impl MemoryGraphServer {
             engagement,
             vec![],
             &sref,
+            &provider,
+            &account,
         )?;
 
         serde_json::to_string_pretty(&impulse).map_err(|e| format!("Serialization error: {}", e))
@@ -455,6 +472,52 @@ impl MemoryGraphServer {
             .map_err(|e| format!("Serialization error: {}", e))
     }
 
+    pub fn handle_create_tag(&self, name: String, color: Option<String>) -> Result<String, String> {
+        let db = self.db.lock().unwrap();
+        let new_tag = crate::models::NewTag {
+            name,
+            color: color.unwrap_or_else(|| "#8E99A4".to_string()),
+        };
+        let tag = db.create_tag(&new_tag)
+            .map_err(|e| format!("Failed to create tag: {}", e))?;
+        serde_json::to_string_pretty(&tag)
+            .map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_list_tags(&self) -> Result<String, String> {
+        let db = self.db.lock().unwrap();
+        let tags = db.list_tags()
+            .map_err(|e| format!("Failed to list tags: {}", e))?;
+        serde_json::to_string_pretty(&tags)
+            .map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_tag_memory(&self, impulse_id: String, tag_name: String) -> Result<String, String> {
+        if self.is_incognito() {
+            return Err("Cannot tag memory in incognito mode".to_string());
+        }
+        let db = self.db.lock().unwrap();
+        // Verify impulse exists
+        db.get_impulse(&impulse_id)
+            .map_err(|e| format!("Impulse not found: {}", e))?;
+        // Verify tag exists
+        db.get_tag(&tag_name)
+            .map_err(|e| format!("Tag not found: {}", e))?;
+        db.tag_impulse(&impulse_id, &tag_name)
+            .map_err(|e| format!("Failed to tag impulse: {}", e))?;
+        Ok(format!("{{\"tagged\": true, \"impulse_id\": \"{}\", \"tag\": \"{}\"}}", impulse_id, tag_name))
+    }
+
+    pub fn handle_untag_memory(&self, impulse_id: String, tag_name: String) -> Result<String, String> {
+        if self.is_incognito() {
+            return Err("Cannot untag memory in incognito mode".to_string());
+        }
+        let db = self.db.lock().unwrap();
+        db.untag_impulse(&impulse_id, &tag_name)
+            .map_err(|e| format!("Failed to untag impulse: {}", e))?;
+        Ok(format!("{{\"untagged\": true, \"impulse_id\": \"{}\", \"tag\": \"{}\"}}", impulse_id, tag_name))
+    }
+
     pub fn handle_sync_status(
         &self,
         sync_dir: String,
@@ -508,6 +571,12 @@ pub struct SaveMemoryParams {
     /// Optional source reference string.
     #[schemars(default)]
     pub source_ref: Option<String>,
+    /// Optional source provider name (e.g., 'claude', 'chatgpt', 'cursor'). Defaults to 'unknown'.
+    #[schemars(default)]
+    pub source_provider: Option<String>,
+    /// Optional source account identifier. Defaults to empty string.
+    #[schemars(default)]
+    pub source_account: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -638,6 +707,31 @@ pub struct SyncStatusParams {
     pub device_id: String,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct CreateTagParams {
+    /// The name of the tag.
+    pub name: String,
+    /// Hex color for the tag (e.g., '#FF5733'). Defaults to '#8E99A4'.
+    #[schemars(default)]
+    pub color: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct TagMemoryParams {
+    /// The ID of the memory to tag.
+    pub impulse_id: String,
+    /// The name of the tag to apply.
+    pub tag_name: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct UntagMemoryParams {
+    /// The ID of the memory to untag.
+    pub impulse_id: String,
+    /// The name of the tag to remove.
+    pub tag_name: String,
+}
+
 #[tool(tool_box)]
 impl McpHandler {
     #[tool(description = "Save a new memory to the graph")]
@@ -651,6 +745,8 @@ impl McpHandler {
             params.emotional_valence,
             params.engagement_level,
             params.source_ref,
+            params.source_provider,
+            params.source_account,
         )
     }
 
@@ -742,6 +838,8 @@ impl McpHandler {
             params.emotional_valence,
             params.engagement_level,
             params.source_ref,
+            params.source_provider,
+            params.source_account,
         )
     }
 
@@ -823,6 +921,35 @@ impl McpHandler {
     ) -> Result<String, String> {
         self.inner
             .handle_sync_status(params.sync_dir, params.device_id)
+    }
+
+    #[tool(description = "Create a tag with a name and hex color for organizing memories")]
+    fn create_tag(
+        &self,
+        #[tool(aggr)] params: CreateTagParams,
+    ) -> Result<String, String> {
+        self.inner.handle_create_tag(params.name, params.color)
+    }
+
+    #[tool(description = "List all tags")]
+    fn list_tags(&self) -> Result<String, String> {
+        self.inner.handle_list_tags()
+    }
+
+    #[tool(description = "Add a tag to a memory")]
+    fn tag_memory(
+        &self,
+        #[tool(aggr)] params: TagMemoryParams,
+    ) -> Result<String, String> {
+        self.inner.handle_tag_memory(params.impulse_id, params.tag_name)
+    }
+
+    #[tool(description = "Remove a tag from a memory")]
+    fn untag_memory(
+        &self,
+        #[tool(aggr)] params: UntagMemoryParams,
+    ) -> Result<String, String> {
+        self.inner.handle_untag_memory(params.impulse_id, params.tag_name)
     }
 }
 

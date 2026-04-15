@@ -491,6 +491,8 @@ mod test_validation {
             None,
             None,
             Some("validation-test".to_string()),
+            None,
+            None,
         );
         assert!(before_result.is_ok(), "Save before incognito should succeed");
 
@@ -511,6 +513,8 @@ mod test_validation {
             None,
             None,
             Some("validation-test".to_string()),
+            None,
+            None,
         );
         assert!(
             incognito_result.is_err(),

@@ -15,6 +15,8 @@ fn create_test_impulse(db: &Database, content: &str) -> String {
         source_signals: vec![],
         source_type: SourceType::ExplicitSave,
         source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     };
     let impulse = db.insert_impulse(&input).unwrap();
     impulse.id
@@ -113,6 +115,8 @@ fn test_sync_import_remote_snapshot() {
         source_signals: vec![],
         source_type: SourceType::ExplicitSave,
         source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     };
     let shared_id = "shared-impulse-id-123";
 

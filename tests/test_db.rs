@@ -31,6 +31,8 @@ fn test_insert_and_get_impulse() {
         source_signals: vec!["long-form response".to_string()],
         source_type: SourceType::ExplicitSave,
         source_ref: "session-001".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     };
 
     let impulse = db.insert_impulse(&input).unwrap();
@@ -61,6 +63,8 @@ fn test_insert_and_get_connection() {
             source_signals: vec![],
             source_type: SourceType::ExplicitSave,
             source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
         })
         .unwrap();
 
@@ -74,6 +78,8 @@ fn test_insert_and_get_connection() {
             source_signals: vec![],
             source_type: SourceType::ExplicitSave,
             source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
         })
         .unwrap();
 
@@ -107,6 +113,8 @@ fn test_update_impulse_creates_supersession() {
             source_signals: vec![],
             source_type: SourceType::ExplicitSave,
             source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
         })
         .unwrap();
 
@@ -142,6 +150,8 @@ fn test_soft_delete() {
             source_signals: vec![],
             source_type: SourceType::ExplicitSave,
             source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
         })
         .unwrap();
 
@@ -167,6 +177,8 @@ fn test_fts_search() {
         source_signals: vec![],
         source_type: SourceType::ExplicitSave,
         source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     })
     .unwrap();
 
@@ -179,6 +191,8 @@ fn test_fts_search() {
         source_signals: vec![],
         source_type: SourceType::ExplicitSave,
         source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     })
     .unwrap();
 
@@ -206,6 +220,8 @@ fn test_fts_search_excludes_non_confirmed() {
         source_signals: vec![],
         source_type: SourceType::ExplicitSave,
         source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     })
     .unwrap();
 
@@ -230,6 +246,8 @@ fn test_memory_stats() {
         source_signals: vec![],
         source_type: SourceType::ExplicitSave,
         source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     })
     .unwrap();
 
@@ -257,6 +275,8 @@ fn test_list_candidates() {
         source_signals: vec![],
         source_type: SourceType::ExplicitSave,
         source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     })
     .unwrap();
 
@@ -282,6 +302,8 @@ fn test_dismiss_impulse() {
         source_signals: vec![],
         source_type: SourceType::ExplicitSave,
         source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     })
     .unwrap();
 
@@ -302,6 +324,8 @@ fn test_touch_impulse() {
         source_signals: vec![],
         source_type: SourceType::ExplicitSave,
         source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     })
     .unwrap();
 
@@ -325,6 +349,8 @@ fn test_touch_connection() {
         source_signals: vec![],
         source_type: SourceType::ExplicitSave,
         source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     }).unwrap();
 
     let b = db.insert_impulse(&NewImpulse {
@@ -336,6 +362,8 @@ fn test_touch_connection() {
         source_signals: vec![],
         source_type: SourceType::ExplicitSave,
         source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
     }).unwrap();
 
     let conn = db.insert_connection(&NewConnection {
@@ -519,4 +547,169 @@ fn test_ghost_source_registry() {
     // FTS search on ghost nodes
     let results = db.search_ghost_nodes_fts("Test Note").unwrap();
     assert_eq!(results.len(), 1);
+}
+
+// === Tag Tests ===
+
+#[test]
+fn test_create_and_list_tags() {
+    use synaptic_graph::models::NewTag;
+
+    let db = common::test_db();
+
+    // Create tags
+    let tag1 = db.create_tag(&NewTag {
+        name: "rust".to_string(),
+        color: "#FF5733".to_string(),
+    }).unwrap();
+    assert_eq!(tag1.name, "rust");
+    assert_eq!(tag1.color, "#FF5733");
+
+    let tag2 = db.create_tag(&NewTag {
+        name: "architecture".to_string(),
+        color: "#3498DB".to_string(),
+    }).unwrap();
+    assert_eq!(tag2.name, "architecture");
+
+    // List tags (sorted by name)
+    let tags = db.list_tags().unwrap();
+    assert_eq!(tags.len(), 2);
+    assert_eq!(tags[0].name, "architecture");
+    assert_eq!(tags[1].name, "rust");
+
+    // Get specific tag
+    let fetched = db.get_tag("rust").unwrap();
+    assert_eq!(fetched.color, "#FF5733");
+
+    // Delete tag
+    db.delete_tag("rust").unwrap();
+    let tags = db.list_tags().unwrap();
+    assert_eq!(tags.len(), 1);
+    assert_eq!(tags[0].name, "architecture");
+}
+
+#[test]
+fn test_tag_and_untag_impulse() {
+    use synaptic_graph::models::NewTag;
+
+    let db = common::test_db();
+
+    // Create an impulse
+    let impulse = db.insert_impulse(&NewImpulse {
+        content: "Rust ownership model".to_string(),
+        impulse_type: ImpulseType::Heuristic,
+        initial_weight: 0.7,
+        emotional_valence: EmotionalValence::Positive,
+        engagement_level: EngagementLevel::High,
+        source_signals: vec![],
+        source_type: SourceType::ExplicitSave,
+        source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
+    }).unwrap();
+
+    // Create a tag
+    db.create_tag(&NewTag {
+        name: "rust".to_string(),
+        color: "#FF5733".to_string(),
+    }).unwrap();
+
+    // Tag the impulse
+    db.tag_impulse(&impulse.id, "rust").unwrap();
+
+    // Verify tag is associated
+    let tags = db.get_tags_for_impulse(&impulse.id).unwrap();
+    assert_eq!(tags.len(), 1);
+    assert_eq!(tags[0].name, "rust");
+
+    // Get impulses for tag
+    let impulses = db.get_impulses_for_tag("rust").unwrap();
+    assert_eq!(impulses.len(), 1);
+    assert_eq!(impulses[0].id, impulse.id);
+
+    // Untag
+    db.untag_impulse(&impulse.id, "rust").unwrap();
+    let tags = db.get_tags_for_impulse(&impulse.id).unwrap();
+    assert_eq!(tags.len(), 0);
+}
+
+#[test]
+fn test_get_tags_for_impulse() {
+    use synaptic_graph::models::NewTag;
+
+    let db = common::test_db();
+
+    let impulse = db.insert_impulse(&NewImpulse {
+        content: "Multi-tag test".to_string(),
+        impulse_type: ImpulseType::Observation,
+        initial_weight: 0.5,
+        emotional_valence: EmotionalValence::Neutral,
+        engagement_level: EngagementLevel::Medium,
+        source_signals: vec![],
+        source_type: SourceType::ExplicitSave,
+        source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
+    }).unwrap();
+
+    db.create_tag(&NewTag { name: "alpha".to_string(), color: "#AAA".to_string() }).unwrap();
+    db.create_tag(&NewTag { name: "beta".to_string(), color: "#BBB".to_string() }).unwrap();
+    db.create_tag(&NewTag { name: "gamma".to_string(), color: "#CCC".to_string() }).unwrap();
+
+    db.tag_impulse(&impulse.id, "alpha").unwrap();
+    db.tag_impulse(&impulse.id, "beta").unwrap();
+    db.tag_impulse(&impulse.id, "gamma").unwrap();
+
+    let tags = db.get_tags_for_impulse(&impulse.id).unwrap();
+    assert_eq!(tags.len(), 3);
+
+    // Tags should be sorted by name
+    assert_eq!(tags[0].name, "alpha");
+    assert_eq!(tags[1].name, "beta");
+    assert_eq!(tags[2].name, "gamma");
+
+    // Tagging same impulse twice should be idempotent (INSERT OR IGNORE)
+    db.tag_impulse(&impulse.id, "alpha").unwrap();
+    let tags = db.get_tags_for_impulse(&impulse.id).unwrap();
+    assert_eq!(tags.len(), 3);
+}
+
+#[test]
+fn test_source_provider_stored() {
+    let db = common::test_db();
+
+    let impulse = db.insert_impulse(&NewImpulse {
+        content: "Provider test".to_string(),
+        impulse_type: ImpulseType::Observation,
+        initial_weight: 0.5,
+        emotional_valence: EmotionalValence::Neutral,
+        engagement_level: EngagementLevel::Medium,
+        source_signals: vec![],
+        source_type: SourceType::ExplicitSave,
+        source_ref: "test".to_string(),
+        source_provider: "claude".to_string(),
+        source_account: "user@example.com".to_string(),
+    }).unwrap();
+
+    let fetched = db.get_impulse(&impulse.id).unwrap();
+    assert_eq!(fetched.source_provider, "claude");
+    assert_eq!(fetched.source_account, "user@example.com");
+
+    // Default values should be 'unknown' and ''
+    let default_impulse = db.insert_impulse(&NewImpulse {
+        content: "Default provider test".to_string(),
+        impulse_type: ImpulseType::Observation,
+        initial_weight: 0.5,
+        emotional_valence: EmotionalValence::Neutral,
+        engagement_level: EngagementLevel::Medium,
+        source_signals: vec![],
+        source_type: SourceType::ExplicitSave,
+        source_ref: "test".to_string(),
+        source_provider: "unknown".to_string(),
+        source_account: String::new(),
+    }).unwrap();
+
+    let fetched_default = db.get_impulse(&default_impulse.id).unwrap();
+    assert_eq!(fetched_default.source_provider, "unknown");
+    assert_eq!(fetched_default.source_account, "");
 }

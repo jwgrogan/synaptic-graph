@@ -30,6 +30,24 @@ impl Database {
         self.conn.execute_batch("PRAGMA journal_mode=WAL;")?;
         self.conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         self.create_tables()?;
+        self.run_migrations()?;
+        Ok(())
+    }
+
+    fn run_migrations(&self) -> SqlResult<()> {
+        // Add source_provider and source_account columns if they don't exist
+        let has_provider: bool = self.conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('impulses') WHERE name='source_provider'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).map(|c| c > 0).unwrap_or(false);
+
+        if !has_provider {
+            self.conn.execute_batch(
+                "ALTER TABLE impulses ADD COLUMN source_provider TEXT NOT NULL DEFAULT 'unknown';
+                 ALTER TABLE impulses ADD COLUMN source_account TEXT NOT NULL DEFAULT '';"
+            )?;
+        }
         Ok(())
     }
 
@@ -121,6 +139,23 @@ impl Database {
                 content_rowid='rowid',
                 tokenize='porter'
             );
+
+            CREATE TABLE IF NOT EXISTS tags (
+                name TEXT PRIMARY KEY,
+                color TEXT NOT NULL DEFAULT '#8E99A4',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS impulse_tags (
+                impulse_id TEXT NOT NULL,
+                tag_name TEXT NOT NULL,
+                PRIMARY KEY (impulse_id, tag_name),
+                FOREIGN KEY (impulse_id) REFERENCES impulses(id),
+                FOREIGN KEY (tag_name) REFERENCES tags(name)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_impulse_tags_impulse ON impulse_tags(impulse_id);
+            CREATE INDEX IF NOT EXISTS idx_impulse_tags_tag ON impulse_tags(tag_name);
             ",
         )?;
         Ok(())
@@ -137,8 +172,8 @@ impl Database {
         self.conn.execute(
             "INSERT INTO impulses (id, content, impulse_type, weight, initial_weight,
              emotional_valence, engagement_level, source_signals, created_at, last_accessed_at,
-             source_type, source_ref, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             source_type, source_ref, status, source_provider, source_account)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 id,
                 input.content,
@@ -153,6 +188,8 @@ impl Database {
                 input.source_type.as_str(),
                 input.source_ref,
                 "candidate",
+                input.source_provider,
+                input.source_account,
             ],
         )?;
 
@@ -174,8 +211,8 @@ impl Database {
         self.conn.execute(
             "INSERT INTO impulses (id, content, impulse_type, weight, initial_weight,
              emotional_valence, engagement_level, source_signals, created_at, last_accessed_at,
-             source_type, source_ref, status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             source_type, source_ref, status, source_provider, source_account)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 id,
                 input.content,
@@ -190,6 +227,8 @@ impl Database {
                 input.source_type.as_str(),
                 input.source_ref,
                 "candidate",
+                input.source_provider,
+                input.source_account,
             ],
         )?;
 
@@ -207,7 +246,8 @@ impl Database {
         self.conn.query_row(
             "SELECT id, content, impulse_type, weight, initial_weight,
              emotional_valence, engagement_level, source_signals, created_at,
-             last_accessed_at, source_type, source_ref, status
+             last_accessed_at, source_type, source_ref, status,
+             source_provider, source_account
              FROM impulses WHERE id = ?1",
             params![id],
             |row| Ok(row_to_impulse(row)),
@@ -249,6 +289,8 @@ impl Database {
             source_signals: old.source_signals,
             source_type: old.source_type,
             source_ref: old.source_ref,
+            source_provider: old.source_provider,
+            source_account: old.source_account,
         };
         let new_impulse = self.insert_impulse(&new_input)?;
 
@@ -287,7 +329,8 @@ impl Database {
                 let mut stmt = self.conn.prepare(
                     "SELECT id, content, impulse_type, weight, initial_weight,
                      emotional_valence, engagement_level, source_signals, created_at,
-                     last_accessed_at, source_type, source_ref, status
+                     last_accessed_at, source_type, source_ref, status,
+                     source_provider, source_account
                      FROM impulses WHERE status = ?1 ORDER BY weight DESC",
                 )?;
                 let rows = stmt.query_map(params![s.as_str()], |row| Ok(row_to_impulse(row)))?;
@@ -297,7 +340,8 @@ impl Database {
                 let mut stmt = self.conn.prepare(
                     "SELECT id, content, impulse_type, weight, initial_weight,
                      emotional_valence, engagement_level, source_signals, created_at,
-                     last_accessed_at, source_type, source_ref, status
+                     last_accessed_at, source_type, source_ref, status,
+                     source_provider, source_account
                      FROM impulses ORDER BY weight DESC",
                 )?;
                 let rows = stmt.query_map([], |row| Ok(row_to_impulse(row)))?;
@@ -608,6 +652,118 @@ impl Database {
         rows.collect()
     }
 
+    // === Tag Operations ===
+
+    pub fn create_tag(&self, tag: &NewTag) -> SqlResult<Tag> {
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+
+        self.conn.execute(
+            "INSERT INTO tags (name, color, created_at) VALUES (?1, ?2, ?3)",
+            params![tag.name, tag.color, now_str],
+        )?;
+
+        self.get_tag(&tag.name)
+    }
+
+    pub fn get_tag(&self, name: &str) -> SqlResult<Tag> {
+        self.conn.query_row(
+            "SELECT name, color, created_at FROM tags WHERE name = ?1",
+            params![name],
+            |row| {
+                let created_str: String = row.get(2)?;
+                Ok(Tag {
+                    name: row.get(0)?,
+                    color: row.get(1)?,
+                    created_at: DateTime::parse_from_rfc3339(&created_str)
+                        .map(|dt| dt.with_timezone(&Utc))
+                        .unwrap_or_else(|_| Utc::now()),
+                })
+            },
+        )
+    }
+
+    pub fn list_tags(&self) -> SqlResult<Vec<Tag>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT name, color, created_at FROM tags ORDER BY name",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let created_str: String = row.get(2)?;
+            Ok(Tag {
+                name: row.get(0)?,
+                color: row.get(1)?,
+                created_at: DateTime::parse_from_rfc3339(&created_str)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now()),
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn delete_tag(&self, name: &str) -> SqlResult<()> {
+        self.conn.execute(
+            "DELETE FROM impulse_tags WHERE tag_name = ?1",
+            params![name],
+        )?;
+        self.conn.execute(
+            "DELETE FROM tags WHERE name = ?1",
+            params![name],
+        )?;
+        Ok(())
+    }
+
+    pub fn tag_impulse(&self, impulse_id: &str, tag_name: &str) -> SqlResult<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO impulse_tags (impulse_id, tag_name) VALUES (?1, ?2)",
+            params![impulse_id, tag_name],
+        )?;
+        Ok(())
+    }
+
+    pub fn untag_impulse(&self, impulse_id: &str, tag_name: &str) -> SqlResult<()> {
+        self.conn.execute(
+            "DELETE FROM impulse_tags WHERE impulse_id = ?1 AND tag_name = ?2",
+            params![impulse_id, tag_name],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_tags_for_impulse(&self, impulse_id: &str) -> SqlResult<Vec<Tag>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.name, t.color, t.created_at
+             FROM tags t
+             JOIN impulse_tags it ON it.tag_name = t.name
+             WHERE it.impulse_id = ?1
+             ORDER BY t.name",
+        )?;
+        let rows = stmt.query_map(params![impulse_id], |row| {
+            let created_str: String = row.get(2)?;
+            Ok(Tag {
+                name: row.get(0)?,
+                color: row.get(1)?,
+                created_at: DateTime::parse_from_rfc3339(&created_str)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now()),
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn get_impulses_for_tag(&self, tag_name: &str) -> SqlResult<Vec<Impulse>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT i.id, i.content, i.impulse_type, i.weight, i.initial_weight,
+             i.emotional_valence, i.engagement_level, i.source_signals, i.created_at,
+             i.last_accessed_at, i.source_type, i.source_ref, i.status,
+             i.source_provider, i.source_account
+             FROM impulses i
+             JOIN impulse_tags it ON it.impulse_id = i.id
+             WHERE it.tag_name = ?1
+             ORDER BY i.weight DESC",
+        )?;
+        let rows = stmt.query_map(params![tag_name], |row| Ok(row_to_impulse(row)))?;
+        rows.collect()
+    }
+
     // === Backup ===
 
     pub fn vacuum_into(&self, path: &str) -> SqlResult<()> {
@@ -676,6 +832,8 @@ fn row_to_impulse(row: &rusqlite::Row) -> Impulse {
         source_ref: row.get(11).unwrap_or_default(),
         status: ImpulseStatus::from_str(&row.get::<_, String>(12).unwrap_or_default())
             .unwrap_or(ImpulseStatus::Confirmed),
+        source_provider: row.get(13).unwrap_or_else(|_| "unknown".to_string()),
+        source_account: row.get(14).unwrap_or_else(|_| String::new()),
     }
 }
 

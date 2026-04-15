@@ -15,6 +15,8 @@ fn test_save_memory_tool() {
         Some("positive".to_string()),
         Some("high".to_string()),
         None,
+        None,
+        None,
     );
 
     assert!(result.is_ok());
@@ -34,6 +36,8 @@ fn test_save_memory_blocked_in_incognito() {
         None,
         None,
         None,
+        None,
+        None,
     );
 
     assert!(result.is_err());
@@ -50,6 +54,8 @@ fn test_retrieve_context_tool() {
         .handle_save_memory(
             "SQLite is excellent for local-first applications".to_string(),
             "heuristic".to_string(),
+            None,
+            None,
             None,
             None,
             None,
@@ -73,6 +79,8 @@ fn test_retrieve_context_blocked_in_incognito() {
         .handle_save_memory(
             "Test memory".to_string(),
             "observation".to_string(),
+            None,
+            None,
             None,
             None,
             None,
@@ -103,6 +111,8 @@ fn test_delete_memory_tool() {
             None,
             None,
             None,
+            None,
+            None,
         )
         .unwrap();
 
@@ -128,6 +138,8 @@ fn test_update_memory_tool() {
         .handle_save_memory(
             "Original content".to_string(),
             "decision".to_string(),
+            None,
+            None,
             None,
             None,
             None,
@@ -251,6 +263,8 @@ fn test_backup_tool() {
         .handle_save_memory(
             "Backup test memory".to_string(),
             "observation".to_string(),
+            None,
+            None,
             None,
             None,
             None,
