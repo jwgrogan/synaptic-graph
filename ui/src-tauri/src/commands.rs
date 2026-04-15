@@ -310,6 +310,41 @@ pub fn quick_save(
 }
 
 #[tauri::command]
+pub fn get_all_tags(state: State<AppState>) -> Result<Vec<serde_json::Value>, String> {
+    let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+    let tags = db.list_tags().map_err(|e| format!("DB: {}", e))?;
+    Ok(tags.iter().map(|t| serde_json::json!({"name": t.name, "color": t.color})).collect())
+}
+
+#[tauri::command]
+pub fn get_impulse_tags(state: State<AppState>, impulse_id: String) -> Result<Vec<serde_json::Value>, String> {
+    let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+    let tags = db.get_tags_for_impulse(&impulse_id).map_err(|e| format!("DB: {}", e))?;
+    Ok(tags.iter().map(|t| serde_json::json!({"name": t.name, "color": t.color})).collect())
+}
+
+#[tauri::command]
+pub async fn export_to_obsidian(
+    state: State<'_, AppState>,
+    output_dir: String,
+) -> Result<serde_json::Value, String> {
+    let db_path = state.db_path.clone();
+    let dir = output_dir.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        let db = Database::open(&db_path).map_err(|e| format!("DB: {}", e))?;
+        synaptic_graph::markdown::export_to_markdown(&db, &dir)
+    })
+    .await
+    .map_err(|e| format!("Task: {}", e))??;
+
+    Ok(serde_json::json!({
+        "files_written": result.files_written,
+        "output_dir": result.output_dir,
+    }))
+}
+
+#[tauri::command]
 pub async fn register_external_graph(
     state: State<'_, AppState>,
     name: String,
@@ -344,4 +379,51 @@ pub async fn register_external_graph(
         "root_path": root_path,
         "nodes_scanned": count,
     }))
+}
+
+#[tauri::command]
+pub fn ui_create_tag(state: State<AppState>, name: String, color: String) -> Result<serde_json::Value, String> {
+    use synaptic_graph::models::NewTag;
+    let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+    let tag = db.create_tag(&NewTag { name: name.clone(), color: color.clone() })
+        .map_err(|e| format!("DB: {}", e))?;
+    Ok(serde_json::json!({"name": tag.name, "color": tag.color}))
+}
+
+#[tauri::command]
+pub fn ui_delete_tag(state: State<AppState>, name: String) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+    db.delete_tag(&name).map_err(|e| format!("DB: {}", e))?;
+    Ok(serde_json::json!({"deleted": name}))
+}
+
+#[tauri::command]
+pub fn ui_tag_impulse(state: State<AppState>, impulse_id: String, tag_name: String) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+    db.tag_impulse(&impulse_id, &tag_name).map_err(|e| format!("DB: {}", e))?;
+    Ok(serde_json::json!({"tagged": true}))
+}
+
+#[tauri::command]
+pub fn ui_untag_impulse(state: State<AppState>, impulse_id: String, tag_name: String) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+    db.untag_impulse(&impulse_id, &tag_name).map_err(|e| format!("DB: {}", e))?;
+    Ok(serde_json::json!({"untagged": true}))
+}
+
+#[tauri::command]
+pub fn ui_link_memories(state: State<AppState>, source_id: String, target_id: String, relationship: Option<String>) -> Result<serde_json::Value, String> {
+    use synaptic_graph::ingestion;
+    let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+    let rel = relationship.unwrap_or_else(|| "relates_to".to_string());
+    let conn = ingestion::manual_link(&db, &source_id, &target_id, &rel, 0.5)?;
+    Ok(serde_json::json!({"id": conn.id, "source_id": conn.source_id, "target_id": conn.target_id}))
+}
+
+#[tauri::command]
+pub fn ui_unlink_memories(state: State<AppState>, connection_id: String) -> Result<serde_json::Value, String> {
+    use synaptic_graph::ingestion;
+    let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+    ingestion::unlink(&db, &connection_id)?;
+    Ok(serde_json::json!({"unlinked": connection_id}))
 }

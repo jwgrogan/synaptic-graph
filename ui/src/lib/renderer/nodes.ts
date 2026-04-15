@@ -1,4 +1,4 @@
-import { Container, Graphics, Circle } from "pixi.js";
+import { Container, Graphics, Circle, Text, TextStyle } from "pixi.js";
 import type { GraphNode } from "../types";
 
 export function renderNodes(
@@ -23,6 +23,40 @@ export function renderNodes(
     g.circle(0, 0, node.radius + 1);
     g.stroke({ color, width: 0.5, alpha: 0.2 });
 
+    // Node label (hidden by default, shown on hover)
+    const labelStyle = new TextStyle({
+      fontFamily: "DM Sans, system-ui, sans-serif",
+      fontSize: 10,
+      fill: "#666666",
+      wordWrap: true,
+      wordWrapWidth: 120,
+    });
+    const label = new Text({
+      text: node.impulse.content.slice(0, 40) + (node.impulse.content.length > 40 ? "..." : ""),
+      style: labelStyle,
+    });
+    label.anchor.set(0.5, 0);
+    label.x = 0;
+    label.y = node.radius + 4;
+    label.alpha = 0;
+    label.label = "nodelabel";
+    g.addChild(label);
+
+    // Source provider badge
+    const providerColors: Record<string, number> = {
+      claude: 0xD97757,
+      openai: 0x10A37F,
+      gemini: 0x4285F4,
+      import: 0x8E99A4,
+      ghost: 0x7B9E87,
+    };
+    const prov = node.impulse.source_provider;
+    if (prov && prov !== "unknown" && prov !== "") {
+      const provColor = providerColors[prov] || 0x8E99A4;
+      g.circle(node.radius * 0.7, -node.radius * 0.7, 2.5);
+      g.fill({ color: provColor, alpha: 0.9 });
+    }
+
     g.x = node.x;
     g.y = node.y;
 
@@ -31,6 +65,18 @@ export function renderNodes(
     g.eventMode = "static";
     g.cursor = "pointer";
     g.label = node.impulse.id;
+
+    // Hover: show label and scale up
+    g.on("pointerover", () => {
+      const lbl = g.children.find((c: any) => c.label === "nodelabel");
+      if (lbl) lbl.alpha = 1;
+      g.scale.set(1.1);
+    });
+    g.on("pointerout", () => {
+      const lbl = g.children.find((c: any) => c.label === "nodelabel");
+      if (lbl) lbl.alpha = 0;
+      g.scale.set(1.0);
+    });
 
     if (onClick) {
       g.on("pointerdown", () => onClick(node.impulse.id));

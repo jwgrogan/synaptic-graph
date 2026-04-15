@@ -7,6 +7,8 @@
   import ImportView from "./lib/ImportView.svelte";
   import FadingView from "./lib/FadingView.svelte";
   import SearchPalette from "./lib/SearchPalette.svelte";
+  import FilterBar from "./lib/FilterBar.svelte";
+  import TagManager from "./lib/TagManager.svelte";
   import { currentView } from "./lib/stores";
 </script>
 
@@ -15,6 +17,7 @@
 
   <div class="main-content">
     {#if $currentView === "galaxy"}
+      <FilterBar />
       <Galaxy />
       <DetailPanel />
     {:else if $currentView === "stats"}
@@ -23,6 +26,8 @@
       <GhostList />
     {:else if $currentView === "fading"}
       <FadingView />
+    {:else if $currentView === "tags"}
+      <TagManager />
     {:else if $currentView === "import"}
       <ImportView />
     {/if}

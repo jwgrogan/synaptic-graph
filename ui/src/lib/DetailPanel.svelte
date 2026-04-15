@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
   import { selectedNodeId, selectedDetail } from "./stores";
   import { getImpulseDetail } from "./api";
   import type { ImpulseDetail } from "./types";
@@ -40,6 +41,18 @@
     selectedNodeId.set(id);
   }
 
+  async function unlinkConnection(connectionId: string) {
+    try {
+      await invoke("ui_unlink_memories", { connectionId });
+      // Refresh detail after unlinking
+      if ($selectedNodeId) {
+        await loadDetail($selectedNodeId);
+      }
+    } catch (e) {
+      console.error("Failed to unlink:", e);
+    }
+  }
+
   function engagementLabel(level: string): { text: string; color: string; bg: string } {
     switch (level) {
       case "high": return { text: "High", color: "var(--accent-warm)", bg: "var(--accent-warm-light)" };
@@ -66,6 +79,17 @@
       case "contextualizes": return "var(--accent-warm)";
       default: return "var(--border-medium)";
     }
+  }
+
+  function providerColor(provider: string): string {
+    const colors: Record<string, string> = {
+      claude: "#D97757",
+      openai: "#10A37F",
+      gemini: "#4285F4",
+      import: "#8E99A4",
+      ghost: "#7B9E87",
+    };
+    return colors[provider] || "#8E99A4";
   }
 
   function relativeTime(dateStr: string): string {
@@ -111,6 +135,14 @@
         <span class="label">Source</span>
         <span class="meta-value">{detail.impulse.source_type}</span>
       </div>
+      {#if detail.impulse.source_provider && detail.impulse.source_provider !== "unknown"}
+        <div class="meta-cell">
+          <span class="label">Provider</span>
+          <span class="provider-pill" style="background: {providerColor(detail.impulse.source_provider)}">
+            {detail.impulse.source_provider}
+          </span>
+        </div>
+      {/if}
       <div class="meta-cell">
         <span class="label">Last accessed</span>
         <span class="meta-value muted">{relativeTime(detail.impulse.last_accessed_at)}</span>
@@ -122,19 +154,26 @@
         <span class="label">Connections ({detail.connections.length})</span>
         <div class="connections-list">
           {#each detail.connections as conn}
-            <button
-              class="connection-item"
-              on:click={() => navigateTo(conn.other_id)}
-            >
-              <div class="conn-border" style="background: {relationshipColor(conn.relationship)}"></div>
-              <div class="conn-body">
-                <div class="conn-content">{conn.other_content.slice(0, 80)}{conn.other_content.length > 80 ? '...' : ''}</div>
-                <div class="conn-meta">
-                  <span class="conn-rel">{conn.relationship}</span>
-                  <span class="conn-weight">{conn.weight.toFixed(2)}</span>
+            <div class="connection-row">
+              <button
+                class="connection-item"
+                on:click={() => navigateTo(conn.other_id)}
+              >
+                <div class="conn-border" style="background: {relationshipColor(conn.relationship)}"></div>
+                <div class="conn-body">
+                  <div class="conn-content">{conn.other_content.slice(0, 80)}{conn.other_content.length > 80 ? '...' : ''}</div>
+                  <div class="conn-meta">
+                    <span class="conn-rel">{conn.relationship}</span>
+                    <span class="conn-weight">{conn.weight.toFixed(2)}</span>
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
+              <button
+                class="unlink-btn"
+                title="Remove connection"
+                on:click|stopPropagation={() => unlinkConnection(conn.id)}
+              >&times;</button>
+            </div>
           {/each}
         </div>
       </div>
@@ -269,6 +308,16 @@
     color: var(--text-muted);
   }
 
+  .provider-pill {
+    font-size: 10px;
+    font-weight: 500;
+    color: #ffffff;
+    padding: 2px 8px;
+    border-radius: 10px;
+    letter-spacing: 0.3px;
+    text-transform: capitalize;
+  }
+
   .connections-section {
     display: flex;
     flex-direction: column;
@@ -331,5 +380,41 @@
 
   .conn-weight {
     font-variant-numeric: tabular-nums;
+  }
+
+  .connection-row {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+  }
+
+  .connection-row .connection-item {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .unlink-btn {
+    width: 24px;
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 14px;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: all var(--transition-fast);
+  }
+
+  .connection-row:hover .unlink-btn {
+    opacity: 1;
+  }
+
+  .unlink-btn:hover {
+    background: var(--accent-rose-light, rgba(196, 114, 127, 0.15));
+    color: var(--accent-rose, #C4727F);
   }
 </style>

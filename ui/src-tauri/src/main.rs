@@ -21,6 +21,15 @@ fn main() {
             commands::get_ghost_nodes,
             commands::quick_save,
             commands::register_external_graph,
+            commands::export_to_obsidian,
+            commands::get_all_tags,
+            commands::get_impulse_tags,
+            commands::ui_create_tag,
+            commands::ui_delete_tag,
+            commands::ui_tag_impulse,
+            commands::ui_untag_impulse,
+            commands::ui_link_memories,
+            commands::ui_unlink_memories,
         ])
         .run(tauri::generate_context!())
         .expect("error while running memory-graph-ui");

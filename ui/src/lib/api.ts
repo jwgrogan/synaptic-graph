@@ -43,3 +43,13 @@ export async function getGhostNodes(
 ): Promise<Record<string, unknown>[]> {
   return invoke<Record<string, unknown>[]>("get_ghost_nodes", { sourceName });
 }
+
+export async function getAllTags(): Promise<{ name: string; color: string }[]> {
+  return invoke("get_all_tags");
+}
+
+export async function getImpulseTags(
+  impulseId: string
+): Promise<{ name: string; color: string }[]> {
+  return invoke("get_impulse_tags", { impulseId });
+}

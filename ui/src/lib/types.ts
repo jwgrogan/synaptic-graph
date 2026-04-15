@@ -11,6 +11,8 @@ export interface Impulse {
   status: string;
   created_at: string;
   last_accessed_at: string;
+  source_provider: string;
+  source_account: string;
 }
 
 export interface Connection {
