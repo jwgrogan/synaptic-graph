@@ -12,45 +12,27 @@ export function renderNodes(
     const g = new Graphics();
     const weight = node.impulse.weight;
 
-    // Neuron soma — slightly irregular filled ellipse in mauve tones
-    // Core color: high weight = deep mauve (#A67B8A), low weight = light sand (#D4C5A9)
-    const deepMauve = { r: 166, g: 123, b: 138 };
-    const lightSand = { r: 212, g: 197, b: 169 };
-    const r = Math.round(lightSand.r + (deepMauve.r - lightSand.r) * weight);
-    const gC = Math.round(lightSand.g + (deepMauve.g - lightSand.g) * weight);
-    const b = Math.round(lightSand.b + (deepMauve.b - lightSand.b) * weight);
-    const somaColor = (r << 16) | (gC << 8) | b;
+    // Parse cluster color to get RGB values
+    const colorHex = node.color || "#8E99A4";
+    const cr = parseInt(colorHex.slice(1, 3), 16);
+    const cg = parseInt(colorHex.slice(3, 5), 16);
+    const cb = parseInt(colorHex.slice(5, 7), 16);
+    const nodeColor = (cr << 16) | (cg << 8) | cb;
 
     const radius = node.radius;
 
-    // Soft outer halo (warm cream)
-    g.ellipse(0, 0, radius * 2.2, radius * 1.9);
-    g.fill({ color: 0xF0EAE0, alpha: 0.12 });
+    // Subtle drop shadow (darker circle offset slightly below)
+    g.circle(0, 1.5, radius);
+    g.fill({ color: 0x000000, alpha: 0.06 });
 
-    // Soma body — slightly irregular via ellipse
-    g.ellipse(0, 0, radius * 1.1, radius * 0.95);
-    g.fill({ color: somaColor, alpha: 0.5 + weight * 0.4 });
+    // Main node circle — clean filled circle with muted cluster color
+    g.circle(0, 0, radius);
+    g.fill({ color: nodeColor, alpha: 0.35 + weight * 0.35 });
 
-    // Inner bright spot
-    g.ellipse(0, 0, radius * 0.4, radius * 0.35);
-    g.fill({ color: 0xFAFAF7, alpha: 0.3 + weight * 0.3 });
-
-    // Dendrite stubs — 3-5 short curved lines radiating outward
-    const dendriteCount = 3 + Math.floor(weight * 2);
-    const dendriteAlpha = 0.2 + weight * 0.3;
-    for (let i = 0; i < dendriteCount; i++) {
-      const angle = (i / dendriteCount) * Math.PI * 2 + (node.impulse.id.charCodeAt(0) * 0.5);
-      const startX = Math.cos(angle) * radius * 0.9;
-      const startY = Math.sin(angle) * radius * 0.8;
-      const endX = Math.cos(angle) * radius * 2.0;
-      const endY = Math.sin(angle) * radius * 1.8;
-      // Control point offset for curve
-      const cpX = (startX + endX) / 2 + Math.sin(angle) * radius * 0.4;
-      const cpY = (startY + endY) / 2 - Math.cos(angle) * radius * 0.4;
-
-      g.moveTo(startX, startY);
-      g.quadraticCurveTo(cpX, cpY, endX, endY);
-      g.stroke({ color: somaColor, width: 1, alpha: dendriteAlpha });
+    // Bright center dot for high-weight nodes only
+    if (weight > 0.6) {
+      g.circle(0, 0, radius * 0.25);
+      g.fill({ color: 0xFFFFFF, alpha: 0.4 + (weight - 0.6) * 0.5 });
     }
 
     g.x = node.x;

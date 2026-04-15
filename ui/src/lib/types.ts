@@ -86,14 +86,14 @@ export interface ImpulseDetail {
 export type ZoomLevel = "galaxy" | "cluster" | "node";
 
 export const NEBULA_COLORS = [
-  "#C9A9B8", // mauve
-  "#A8B5A0", // sage
-  "#D4C5A9", // sand
-  "#D4928A", // rose
-  "#8B9B6B", // olive
-  "#B8A9C9", // lavender
-  "#A0B5B8", // muted teal
-  "#C9B8A9", // warm tan
-  "#A9C9B8", // mint sage
-  "#B8A0A8", // dusty rose
+  "#5C6BC0", // muted indigo
+  "#7B9E87", // sage
+  "#C17F59", // warm amber
+  "#C4727F", // dusty rose
+  "#8E99A4", // steel
+  "#9B8EC4", // lavender
+  "#6B9DAD", // teal
+  "#B8956B", // caramel
+  "#7BAD8E", // mint
+  "#AD7B8E", // mauve
 ] as const;

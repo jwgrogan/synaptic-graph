@@ -11,7 +11,7 @@
 </script>
 
 <div class="stats-view">
-  <h2>Memory Stats</h2>
+  <h2>Statistics</h2>
 
   {#if stats}
     <div class="stat-grid">
@@ -39,14 +39,16 @@
 
 <style>
   .stats-view {
-    padding: 32px;
+    padding: 40px;
     max-width: 600px;
   }
 
   h2 {
-    font-size: 18px;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 400;
     color: var(--text-primary);
-    margin-bottom: 24px;
+    margin-bottom: 32px;
   }
 
   .stat-grid {
@@ -56,22 +58,24 @@
   }
 
   .stat-card {
-    background: var(--bg-panel);
+    background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    padding: 20px;
+    border-radius: var(--radius-md);
+    padding: 28px 24px;
   }
 
   .stat-value {
-    font-size: 32px;
-    font-weight: 700;
-    color: var(--accent-mauve-deep);
+    font-family: var(--font-display);
+    font-size: 36px;
+    font-weight: 300;
+    color: var(--text-primary);
+    line-height: 1;
   }
 
   .stat-label {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-muted);
-    margin-top: 4px;
+    margin-top: 8px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }

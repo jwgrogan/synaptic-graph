@@ -10,7 +10,7 @@
 
 ## Categories (output in this order):
 
-1. **Instructions**: Rules I've explicitly asked you to follow going forward — tone, format, style, "always do X", "never do Y", and corrections to your behavior. Only include rules from stored memories, not from conversations.
+1. **Instructions**: Rules I've explicitly asked you to follow going forward \u2014 tone, format, style, "always do X", "never do Y", and corrections to your behavior. Only include rules from stored memories, not from conversations.
 
 2. **Identity**: Name, age, location, education, family, relationships, languages, and personal interests.
 
@@ -51,7 +51,6 @@ If no date is known, use [unknown] instead.
     imported = [];
 
     try {
-      // Parse the export format: lines starting with [date] -
       const lines = importText.split("\n");
       let currentCategory = "observation";
       const entries: { content: string; type: string }[] = [];
@@ -67,7 +66,6 @@ If no date is known, use [unknown] instead.
       for (const line of lines) {
         const trimmed = line.trim();
 
-        // Detect category headers
         const headerMatch = trimmed.match(/^#+\s*\d*\.?\s*(Instructions|Identity|Career|Projects|Preferences)/i);
         if (headerMatch) {
           const cat = headerMatch[1].toLowerCase();
@@ -75,7 +73,6 @@ If no date is known, use [unknown] instead.
           continue;
         }
 
-        // Detect entry lines: [date] - content
         const entryMatch = trimmed.match(/^\[[\w-]+\]\s*-\s*(.+)$/);
         if (entryMatch) {
           entries.push({
@@ -91,7 +88,6 @@ If no date is known, use [unknown] instead.
         return;
       }
 
-      // Import each entry via the Tauri API
       const { invoke } = await import("@tauri-apps/api/core");
 
       for (const entry of entries) {
@@ -129,7 +125,7 @@ If no date is known, use [unknown] instead.
       <p>Send this prompt to ChatGPT, Claude, Gemini, or any AI that has your memories:</p>
       <div class="prompt-box">
         <pre>{exportPrompt.slice(0, 200)}...</pre>
-        <button class="copy-btn" on:click={copyPrompt}>
+        <button class="outline-btn" on:click={copyPrompt}>
           {copied ? "Copied!" : "Copy Full Prompt"}
         </button>
       </div>
@@ -155,7 +151,7 @@ If no date is known, use [unknown] instead.
     <div class="step-content">
       <h3>Import</h3>
       <button
-        class="import-btn"
+        class="outline-btn primary"
         on:click={parseAndImport}
         disabled={parsing || !importText.trim()}
       >
@@ -184,14 +180,16 @@ If no date is known, use [unknown] instead.
 
 <style>
   .import-view {
-    padding: 32px;
+    padding: 40px;
     max-width: 700px;
     overflow-y: auto;
     height: 100%;
   }
 
   h2 {
-    font-size: 18px;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 400;
     color: var(--text-primary);
     margin-bottom: 4px;
   }
@@ -199,26 +197,27 @@ If no date is known, use [unknown] instead.
   .subtitle {
     color: var(--text-muted);
     font-size: 13px;
-    margin-bottom: 24px;
+    margin-bottom: 28px;
   }
 
   .step {
     display: flex;
     gap: 16px;
-    margin-bottom: 24px;
+    margin-bottom: 28px;
   }
 
   .step-number {
     width: 28px;
     height: 28px;
     border-radius: 50%;
-    background: var(--accent-mauve);
-    color: white;
+    border: 1.5px solid var(--border-medium);
+    background: transparent;
+    color: var(--text-secondary);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
-    font-weight: 700;
+    font-size: 12px;
+    font-weight: 500;
     flex-shrink: 0;
   }
 
@@ -228,6 +227,7 @@ If no date is known, use [unknown] instead.
 
   .step-content h3 {
     font-size: 14px;
+    font-weight: 500;
     color: var(--text-primary);
     margin-bottom: 6px;
   }
@@ -235,88 +235,90 @@ If no date is known, use [unknown] instead.
   .step-content p {
     font-size: 13px;
     color: var(--text-secondary);
-    margin-bottom: 8px;
+    margin-bottom: 10px;
   }
 
   .prompt-box {
-    background: var(--bg-panel);
+    background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    padding: 12px;
-    position: relative;
+    border-radius: var(--radius-md);
+    padding: 14px;
   }
 
   .prompt-box pre {
     font-size: 11px;
     color: var(--text-muted);
     white-space: pre-wrap;
-    margin-bottom: 8px;
-    font-family: monospace;
+    margin-bottom: 10px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
   }
 
-  .copy-btn {
-    background: var(--accent-mauve);
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 6px;
+  .outline-btn {
+    background: transparent;
+    color: var(--accent-primary);
+    border: 1px solid var(--accent-primary);
+    padding: 8px 18px;
+    border-radius: var(--radius-sm);
     font-size: 12px;
+    font-weight: 500;
     cursor: pointer;
-    font-weight: 600;
+    font-family: var(--font-body);
+    transition: all var(--transition-fast);
   }
 
-  .copy-btn:hover {
-    opacity: 0.9;
+  .outline-btn:hover {
+    background: var(--accent-primary-light);
+  }
+
+  .outline-btn.primary {
+    padding: 10px 22px;
+    font-size: 13px;
+  }
+
+  .outline-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 
   .import-textarea {
     width: 100%;
-    background: var(--bg-panel);
+    background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    padding: 12px;
+    border-radius: var(--radius-md);
+    padding: 14px;
     color: var(--text-primary);
     font-size: 12px;
-    font-family: monospace;
+    font-family: 'SF Mono', 'Fira Code', monospace;
     resize: vertical;
+    transition: border-color var(--transition-fast);
+    outline: none;
+  }
+
+  .import-textarea:focus {
+    border-color: var(--accent-primary);
   }
 
   .import-textarea::placeholder {
-    color: var(--text-muted);
-  }
-
-  .import-btn {
-    background: var(--accent-mauve);
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .import-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+    color: var(--text-faint);
   }
 
   .error {
-    color: #f87171;
+    color: var(--accent-rose);
     font-size: 13px;
     margin-top: 12px;
     padding: 8px 12px;
-    background: rgba(248, 113, 113, 0.1);
-    border-radius: 6px;
+    background: var(--accent-rose-light);
+    border-radius: var(--radius-sm);
   }
 
   .results {
-    margin-top: 20px;
+    margin-top: 24px;
   }
 
   .results h3 {
     font-size: 14px;
-    color: var(--accent-mauve);
+    font-weight: 500;
+    color: var(--accent-primary);
     margin-bottom: 12px;
   }
 
@@ -325,16 +327,16 @@ If no date is known, use [unknown] instead.
     gap: 8px;
     align-items: center;
     padding: 8px 0;
-    border-bottom: 1px solid rgba(169, 145, 125, 0.1);
+    border-bottom: 1px solid var(--border-subtle);
     font-size: 12px;
   }
 
   .result-item.failed {
-    opacity: 0.5;
+    opacity: 0.4;
   }
 
   .result-type {
-    color: var(--accent-mauve-deep);
+    color: var(--accent-primary);
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -348,11 +350,11 @@ If no date is known, use [unknown] instead.
   }
 
   .result-status {
-    color: var(--accent-sage-deep);
+    color: var(--accent-sage);
     font-size: 11px;
   }
 
   .result-item.failed .result-status {
-    color: #f87171;
+    color: var(--accent-rose);
   }
 </style>

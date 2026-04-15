@@ -1,5 +1,6 @@
 import { Container, Graphics } from "pixi.js";
 import type { Cluster } from "./clusters";
+import { NEBULA_COLORS } from "../types";
 
 export function renderNebulae(
   layer: Container,
@@ -27,24 +28,21 @@ export function renderNebulae(
 
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
-    const radiusX = Math.max((maxX - minX) / 2, 30) + 40;
-    const radiusY = Math.max((maxY - minY) / 2, 30) + 35;
+    const radius = Math.max((Math.max(maxX - minX, maxY - minY)) / 2, 30) + 50;
 
     const g = new Graphics();
 
-    // Organic blob shape — use cream/sand tones with very low alpha
-    // Multiple overlapping ellipses for an organic feel
-    g.ellipse(cx, cy, radiusX * 1.4, radiusY * 1.3);
-    g.fill({ color: 0xF0EAE0, alpha: 0.04 }); // cream, very faint
+    // Get cluster color
+    const colorHex = NEBULA_COLORS[cluster.id % NEBULA_COLORS.length];
+    const cr = parseInt(colorHex.slice(1, 3), 16);
+    const cg = parseInt(colorHex.slice(3, 5), 16);
+    const cb = parseInt(colorHex.slice(5, 7), 16);
+    const color = (cr << 16) | (cg << 8) | cb;
 
-    g.ellipse(cx - radiusX * 0.1, cy + radiusY * 0.05, radiusX * 1.0, radiusY * 0.9);
-    g.fill({ color: 0xD4C5A9, alpha: 0.05 }); // sand
-
-    g.ellipse(cx + radiusX * 0.05, cy - radiusY * 0.08, radiusX * 0.7, radiusY * 0.65);
-    g.fill({ color: 0xF0EAE0, alpha: 0.06 }); // cream, slightly more
-
-    g.ellipse(cx, cy, radiusX * 0.35, radiusY * 0.3);
-    g.fill({ color: 0xD4C5A9, alpha: 0.08 }); // sand core
+    // Single circle per cluster, very subtle — alpha 0.02 to 0.04
+    const alpha = 0.02 + Math.min(cluster.nodeIds.size / 50, 0.02);
+    g.circle(cx, cy, radius);
+    g.fill({ color, alpha });
 
     layer.addChild(g);
   }

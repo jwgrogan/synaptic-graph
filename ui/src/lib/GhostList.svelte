@@ -28,7 +28,6 @@
     if (!selected) return;
 
     const path = selected as string;
-    // Auto-generate name from folder name
     const folderName = path.split("/").pop() || "vault";
     registerName = folderName;
 
@@ -40,7 +39,7 @@
         "register_external_graph",
         { name: folderName, rootPath: path, sourceType: "obsidian" }
       );
-      registerResult = `Connected "${result.name}" — ${result.nodes_scanned} notes mapped`;
+      registerResult = `Connected "${result.name}" \u2014 ${result.nodes_scanned} notes mapped`;
       await loadSources();
     } catch (err) {
       registerResult = `Error: ${err}`;
@@ -48,14 +47,22 @@
 
     registering = false;
   }
+
+  function sourceAccent(type: string): string {
+    switch (type) {
+      case "obsidian": return "var(--accent-primary)";
+      case "repo": return "var(--accent-sage)";
+      default: return "var(--accent-warm)";
+    }
+  }
 </script>
 
 <div class="ghost-list">
   <h2>External Graphs</h2>
-  <p class="subtitle">Connect your knowledge bases — Obsidian vaults, repos, or any markdown directory.</p>
+  <p class="subtitle">Connect your knowledge bases -- Obsidian vaults, repos, or any markdown directory.</p>
 
   <button class="connect-btn" on:click={pickAndRegister} disabled={registering}>
-    {registering ? "Scanning..." : "+ Connect Knowledge Base"}
+    {registering ? "Scanning..." : "Connect Knowledge Base"}
   </button>
 
   {#if registerResult}
@@ -65,10 +72,10 @@
   {/if}
 
   {#if sources.length === 0}
-    <p class="empty">No external graphs connected yet. Click the button above to select a folder.</p>
+    <p class="empty">No external graphs connected yet.</p>
   {:else}
     {#each sources as source}
-      <div class="ghost-card">
+      <div class="ghost-card" style="border-left-color: {sourceAccent(source.source_type)}">
         <div class="ghost-name">{source.name}</div>
         <div class="ghost-meta">
           <span>{source.source_type}</span>
@@ -85,12 +92,14 @@
 
 <style>
   .ghost-list {
-    padding: 32px;
+    padding: 40px;
     max-width: 600px;
   }
 
   h2 {
-    font-size: 18px;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 400;
     color: var(--text-primary);
     margin-bottom: 4px;
   }
@@ -98,23 +107,25 @@
   .subtitle {
     color: var(--text-muted);
     font-size: 13px;
-    margin-bottom: 16px;
+    margin-bottom: 20px;
   }
 
   .connect-btn {
-    background: var(--accent-mauve);
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 8px;
+    background: transparent;
+    color: var(--accent-primary);
+    border: 1px solid var(--accent-primary);
+    padding: 8px 20px;
+    border-radius: var(--radius-sm);
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 500;
     cursor: pointer;
     margin-bottom: 16px;
+    transition: all var(--transition-fast);
+    font-family: var(--font-body);
   }
 
   .connect-btn:hover {
-    opacity: 0.9;
+    background: var(--accent-primary-light);
   }
 
   .connect-btn:disabled {
@@ -124,35 +135,36 @@
 
   .register-result {
     font-size: 13px;
-    color: var(--accent-sage-deep);
+    color: var(--accent-sage);
     margin-bottom: 16px;
     padding: 8px 12px;
-    background: rgba(168, 181, 160, 0.15);
-    border-radius: 6px;
+    background: var(--accent-sage-light);
+    border-radius: var(--radius-sm);
   }
 
   .register-result.error {
-    color: #f87171;
-    background: rgba(248, 113, 113, 0.1);
+    color: var(--accent-rose);
+    background: var(--accent-rose-light);
   }
 
   .empty {
     color: var(--text-muted);
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .ghost-card {
-    background: var(--bg-panel);
+    background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
-    border-radius: 8px;
+    border-left: 3px solid var(--accent-primary);
+    border-radius: var(--radius-sm);
     padding: 16px;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
   }
 
   .ghost-name {
-    font-size: 15px;
-    font-weight: 600;
-    color: var(--accent-sage-deep);
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
     margin-bottom: 6px;
   }
 

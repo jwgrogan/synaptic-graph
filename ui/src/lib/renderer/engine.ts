@@ -29,7 +29,7 @@ export class GalaxyEngine {
   async init(canvas: HTMLCanvasElement) {
     await this.app.init({
       canvas,
-      background: 0xF5F0EB,
+      background: 0xFAFAF8,
       resizeTo: canvas.parentElement ?? undefined,
       antialias: true,
       resolution: window.devicePixelRatio || 1,

@@ -50,10 +50,7 @@
         };
       });
 
-      // Sort by effective weight ascending (most faded first)
       scored.sort((a, b) => a.effectiveWeight - b.effectiveWeight);
-
-      // Only show memories that have meaningfully faded (effective < 80% of stored weight)
       fading = scored.filter((m) => m.effectiveWeight < m.impulse.weight * 0.8);
     } catch (err) {
       console.error("Failed to load fading memories:", err);
@@ -70,28 +67,33 @@
   }
 
   function fadingLevel(ratio: number): string {
-    if (ratio < 0.3) return "critically fading";
-    if (ratio < 0.5) return "significantly faded";
-    if (ratio < 0.7) return "moderately faded";
-    return "slightly faded";
+    if (ratio < 0.3) return "critical";
+    if (ratio < 0.5) return "significant";
+    if (ratio < 0.7) return "moderate";
+    return "slight";
+  }
+
+  function borderColor(ratio: number): string {
+    if (ratio < 0.3) return "var(--accent-rose)";
+    if (ratio < 0.7) return "var(--accent-warm)";
+    return "var(--accent-sage)";
   }
 
   function barColor(ratio: number): string {
     if (ratio < 0.3) return "var(--accent-rose)";
-    if (ratio < 0.5) return "var(--accent-sand)";
+    if (ratio < 0.7) return "var(--accent-warm)";
     return "var(--accent-sage)";
   }
 </script>
 
 <div class="fading-view">
   <h2>Fading Memories</h2>
-  <p class="subtitle">Knowledge that's weakening from disuse. Re-engage to strengthen these connections.</p>
+  <p class="subtitle">Knowledge weakening from disuse. Re-engage to strengthen these connections.</p>
 
   {#if loading}
     <p class="loading">Analyzing memory decay...</p>
   {:else if fading.length === 0}
     <div class="all-good">
-      <div class="all-good-icon">&#10003;</div>
       <p>All memories are well-maintained. Nothing is significantly fading.</p>
     </div>
   {:else}
@@ -99,7 +101,7 @@
 
     {#each fading as mem}
       {@const ratio = mem.effectiveWeight / mem.impulse.weight}
-      <div class="fading-card">
+      <div class="fading-card" style="border-left-color: {borderColor(ratio)}">
         <div class="fading-header">
           <span class="fading-type">{mem.impulse.impulse_type}</span>
           <span class="fading-time">{formatTime(mem.hoursSinceAccess)}</span>
@@ -116,10 +118,6 @@
                 class="decay-fill"
                 style="width: {ratio * 100}%; background: {barColor(ratio)}"
               ></div>
-              <div
-                class="decay-ghost"
-                style="width: {100}%"
-              ></div>
             </div>
             <div class="decay-numbers">
               <span>{mem.effectiveWeight.toFixed(3)}</span>
@@ -129,7 +127,7 @@
           {#if mem.connectionCount > 0}
             <span class="connections-badge">{mem.connectionCount} connections</span>
           {:else}
-            <span class="connections-badge orphan">orphan — no connections</span>
+            <span class="connections-badge orphan">orphan</span>
           {/if}
         </div>
       </div>
@@ -139,14 +137,16 @@
 
 <style>
   .fading-view {
-    padding: 32px;
+    padding: 40px;
     max-width: 650px;
     overflow-y: auto;
     height: 100%;
   }
 
   h2 {
-    font-size: 18px;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 400;
     color: var(--text-primary);
     margin-bottom: 4px;
   }
@@ -154,7 +154,7 @@
   .subtitle {
     color: var(--text-muted);
     font-size: 13px;
-    margin-bottom: 20px;
+    margin-bottom: 24px;
   }
 
   .loading {
@@ -165,27 +165,22 @@
   .all-good {
     text-align: center;
     padding: 40px 20px;
-    color: var(--accent-sage-deep);
-  }
-
-  .all-good-icon {
-    font-size: 32px;
-    margin-bottom: 8px;
+    color: var(--accent-sage);
   }
 
   .count {
-    font-size: 13px;
-    color: var(--accent-rose);
+    font-size: 12px;
+    color: var(--text-muted);
     margin-bottom: 16px;
-    font-weight: 600;
   }
 
   .fading-card {
-    background: var(--bg-panel);
+    background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    padding: 14px;
-    margin-bottom: 10px;
+    border-left: 3px solid var(--accent-warm);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    margin-bottom: 8px;
   }
 
   .fading-header {
@@ -198,7 +193,7 @@
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: var(--accent-mauve-deep);
+    color: var(--text-muted);
   }
 
   .fading-time {
@@ -209,8 +204,8 @@
   .fading-content {
     font-size: 13px;
     color: var(--text-primary);
-    line-height: 1.4;
-    margin-bottom: 10px;
+    line-height: 1.5;
+    margin-bottom: 12px;
   }
 
   .fading-meta {
@@ -228,37 +223,24 @@
     justify-content: space-between;
     font-size: 10px;
     color: var(--text-muted);
-    margin-bottom: 3px;
+    margin-bottom: 4px;
   }
 
   .decay-status {
-    font-weight: 600;
+    font-weight: 500;
   }
 
   .decay-bar {
-    height: 5px;
+    height: 3px;
     background: var(--border-subtle);
-    border-radius: 3px;
+    border-radius: 2px;
     overflow: hidden;
-    position: relative;
   }
 
   .decay-fill {
     height: 100%;
-    border-radius: 3px;
-    position: absolute;
-    top: 0;
-    left: 0;
-    z-index: 1;
-  }
-
-  .decay-ghost {
-    height: 100%;
-    background: var(--border-subtle);
-    border-radius: 3px;
-    position: absolute;
-    top: 0;
-    left: 0;
+    border-radius: 2px;
+    transition: width var(--transition-medium);
   }
 
   .decay-numbers {
@@ -266,7 +248,8 @@
     gap: 4px;
     font-size: 10px;
     color: var(--text-muted);
-    margin-top: 2px;
+    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
   }
 
   .decay-original {
@@ -275,7 +258,7 @@
 
   .connections-badge {
     font-size: 10px;
-    color: var(--accent-sage-deep);
+    color: var(--text-muted);
     white-space: nowrap;
   }
 

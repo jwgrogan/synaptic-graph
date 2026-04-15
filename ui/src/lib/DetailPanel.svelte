@@ -5,11 +5,13 @@
 
   let detail: ImpulseDetail | null = null;
   let loading = false;
+  let visible = false;
 
   $: if ($selectedNodeId) {
     loadDetail($selectedNodeId);
   } else {
     detail = null;
+    visible = false;
   }
 
   async function loadDetail(id: string) {
@@ -17,6 +19,8 @@
     try {
       detail = await getImpulseDetail(id);
       selectedDetail.set(detail);
+      // Trigger slide-in after data loads
+      requestAnimationFrame(() => { visible = true; });
     } catch (e) {
       console.error("Failed to load detail:", e);
       detail = null;
@@ -25,29 +29,42 @@
   }
 
   function close() {
-    selectedNodeId.set(null);
-    selectedDetail.set(null);
+    visible = false;
+    setTimeout(() => {
+      selectedNodeId.set(null);
+      selectedDetail.set(null);
+    }, 200);
   }
 
   function navigateTo(id: string) {
     selectedNodeId.set(id);
   }
 
-  function engagementColor(level: string): string {
+  function engagementLabel(level: string): { text: string; color: string; bg: string } {
     switch (level) {
-      case "high": return "#fbbf24";
-      case "medium": return "#94a3b8";
-      case "low": return "#475569";
-      default: return "#64748b";
+      case "high": return { text: "High", color: "var(--accent-warm)", bg: "var(--accent-warm-light)" };
+      case "medium": return { text: "Medium", color: "var(--accent-primary)", bg: "var(--accent-primary-light)" };
+      case "low": return { text: "Low", color: "var(--text-muted)", bg: "var(--bg-hover)" };
+      default: return { text: level, color: "var(--text-muted)", bg: "var(--bg-hover)" };
     }
   }
 
-  function valenceColor(valence: string): string {
+  function valenceLabel(valence: string): { text: string; color: string; bg: string } {
     switch (valence) {
-      case "positive": return "#4ade80";
-      case "negative": return "#f87171";
-      case "neutral": return "#94a3b8";
-      default: return "#64748b";
+      case "positive": return { text: "Positive", color: "var(--accent-sage)", bg: "var(--accent-sage-light)" };
+      case "negative": return { text: "Negative", color: "var(--accent-rose)", bg: "var(--accent-rose-light)" };
+      case "neutral": return { text: "Neutral", color: "var(--text-muted)", bg: "var(--bg-hover)" };
+      default: return { text: valence, color: "var(--text-muted)", bg: "var(--bg-hover)" };
+    }
+  }
+
+  function relationshipColor(rel: string): string {
+    switch (rel) {
+      case "strengthens": return "var(--accent-sage)";
+      case "contradicts": return "var(--accent-rose)";
+      case "extends": return "var(--accent-primary)";
+      case "contextualizes": return "var(--accent-warm)";
+      default: return "var(--border-medium)";
     }
   }
 
@@ -65,63 +82,61 @@
 </script>
 
 {#if $selectedNodeId && detail}
-  <div class="detail-panel">
-    <button class="close-btn" on:click={close}>x</button>
+  <div class="detail-panel" class:visible>
+    <button class="close-btn" on:click={close}>&times;</button>
 
-    <h2 class="content">{detail.impulse.content}</h2>
+    <h2 class="content-title">{detail.impulse.content}</h2>
 
-    <div class="meta-row">
-      <div class="meta-item">
+    <div class="weight-section">
+      <div class="weight-header">
         <span class="label">Weight</span>
-        <div class="weight-bar">
-          <div class="weight-fill" style="width: {detail.impulse.weight * 100}%"></div>
-        </div>
-        <span class="value">{detail.impulse.weight.toFixed(2)}</span>
+        <span class="weight-value">{detail.impulse.weight.toFixed(2)}</span>
+      </div>
+      <div class="weight-bar">
+        <div class="weight-fill" style="width: {detail.impulse.weight * 100}%"></div>
       </div>
     </div>
 
-    <div class="meta-row">
-      <div class="meta-item">
-        <span class="label">Engagement</span>
-        <span class="dot" style="background: {engagementColor(detail.impulse.engagement_level)}"></span>
-        <span class="value">{detail.impulse.engagement_level}</span>
-      </div>
-      <div class="meta-item">
-        <span class="label">Valence</span>
-        <span class="dot" style="background: {valenceColor(detail.impulse.emotional_valence)}"></span>
-        <span class="value">{detail.impulse.emotional_valence}</span>
-      </div>
+    <div class="pills-row">
+      <span class="pill" style="color: {engagementLabel(detail.impulse.engagement_level).color}; background: {engagementLabel(detail.impulse.engagement_level).bg}">{engagementLabel(detail.impulse.engagement_level).text}</span>
+      <span class="pill" style="color: {valenceLabel(detail.impulse.emotional_valence).color}; background: {valenceLabel(detail.impulse.emotional_valence).bg}">{valenceLabel(detail.impulse.emotional_valence).text}</span>
     </div>
 
-    <div class="meta-row">
-      <div class="meta-item">
+    <div class="meta-grid">
+      <div class="meta-cell">
         <span class="label">Type</span>
-        <span class="value">{detail.impulse.impulse_type}</span>
+        <span class="meta-value">{detail.impulse.impulse_type}</span>
       </div>
-      <div class="meta-item">
+      <div class="meta-cell">
         <span class="label">Source</span>
-        <span class="value">{detail.impulse.source_type}</span>
+        <span class="meta-value">{detail.impulse.source_type}</span>
       </div>
-    </div>
-
-    <div class="meta-row">
-      <span class="label">Last accessed</span>
-      <span class="value muted">{relativeTime(detail.impulse.last_accessed_at)}</span>
+      <div class="meta-cell">
+        <span class="label">Last accessed</span>
+        <span class="meta-value muted">{relativeTime(detail.impulse.last_accessed_at)}</span>
+      </div>
     </div>
 
     {#if detail.connections.length > 0}
       <div class="connections-section">
         <span class="label">Connections ({detail.connections.length})</span>
-        {#each detail.connections as conn}
-          <button
-            class="connection-card"
-            style="opacity: {Math.max(0.4, conn.weight)}"
-            on:click={() => navigateTo(conn.other_id)}
-          >
-            <div class="conn-content">{conn.other_content.slice(0, 80)}{conn.other_content.length > 80 ? '...' : ''}</div>
-            <div class="conn-meta">{conn.relationship} · weight {conn.weight.toFixed(2)}</div>
-          </button>
-        {/each}
+        <div class="connections-list">
+          {#each detail.connections as conn}
+            <button
+              class="connection-item"
+              on:click={() => navigateTo(conn.other_id)}
+            >
+              <div class="conn-border" style="background: {relationshipColor(conn.relationship)}"></div>
+              <div class="conn-body">
+                <div class="conn-content">{conn.other_content.slice(0, 80)}{conn.other_content.length > 80 ? '...' : ''}</div>
+                <div class="conn-meta">
+                  <span class="conn-rel">{conn.relationship}</span>
+                  <span class="conn-weight">{conn.weight.toFixed(2)}</span>
+                </div>
+              </div>
+            </button>
+          {/each}
+        </div>
       </div>
     {/if}
   </div>
@@ -132,44 +147,95 @@
     position: absolute;
     top: 0;
     right: 0;
-    width: 320px;
+    width: 340px;
     height: 100%;
     background: var(--bg-panel);
-    border-left: 1px solid var(--border-subtle);
-    padding: 20px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: var(--shadow-panel);
+    padding: 24px 20px;
     overflow-y: auto;
     z-index: 10;
+    transform: translateX(100%);
+    transition: transform var(--transition-medium);
+  }
+
+  .detail-panel.visible {
+    transform: translateX(0);
   }
 
   .close-btn {
     position: absolute;
-    top: 12px;
-    right: 12px;
+    top: 16px;
+    right: 16px;
     background: none;
     border: none;
     color: var(--text-muted);
-    font-size: 16px;
+    font-size: 18px;
     cursor: pointer;
+    line-height: 1;
+    padding: 4px;
+    transition: color var(--transition-fast);
   }
 
-  .content {
-    font-size: 14px;
-    font-weight: 600;
+  .close-btn:hover {
     color: var(--text-primary);
-    margin-bottom: 16px;
+  }
+
+  .content-title {
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 400;
+    color: var(--text-primary);
+    margin-bottom: 20px;
     line-height: 1.5;
+    padding-right: 24px;
   }
 
-  .meta-row {
-    display: flex;
-    gap: 16px;
-    margin-bottom: 12px;
+  .weight-section {
+    margin-bottom: 16px;
   }
 
-  .meta-item {
+  .weight-header {
     display: flex;
+    justify-content: space-between;
     align-items: center;
+    margin-bottom: 6px;
+  }
+
+  .weight-value {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .weight-bar {
+    width: 100%;
+    height: 3px;
+    background: var(--border-subtle);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .weight-fill {
+    height: 100%;
+    background: var(--accent-primary);
+    border-radius: 2px;
+    transition: width var(--transition-medium);
+  }
+
+  .pills-row {
+    display: flex;
     gap: 6px;
+    margin-bottom: 16px;
+  }
+
+  .pill {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 20px;
+    letter-spacing: 0.2px;
   }
 
   .label {
@@ -179,66 +245,91 @@
     color: var(--text-muted);
   }
 
-  .value {
+  .meta-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .meta-cell {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .meta-value {
     font-size: 12px;
     color: var(--text-secondary);
   }
 
-  .value.muted {
+  .meta-value.muted {
     color: var(--text-muted);
   }
 
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
-
-  .weight-bar {
-    width: 80px;
-    height: 5px;
-    background: rgba(201, 169, 184, 0.15);
-    border-radius: 3px;
-    overflow: hidden;
-  }
-
-  .weight-fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--accent-mauve), var(--accent-mauve-deep));
-    border-radius: 3px;
-  }
-
   .connections-section {
-    margin-top: 16px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
   }
 
-  .connection-card {
-    background: rgba(168, 181, 160, 0.1);
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
-    padding: 10px;
+  .connections-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .connection-item {
+    display: flex;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     text-align: left;
     color: inherit;
     font: inherit;
+    padding: 0;
+    overflow: hidden;
+    transition: background var(--transition-fast);
   }
 
-  .connection-card:hover {
-    background: rgba(168, 181, 160, 0.18);
+  .connection-item:hover {
+    background: var(--bg-hover);
+  }
+
+  .conn-border {
+    width: 3px;
+    flex-shrink: 0;
+    border-radius: 2px;
+  }
+
+  .conn-body {
+    padding: 8px 10px;
+    flex: 1;
+    min-width: 0;
   }
 
   .conn-content {
     font-size: 12px;
-    color: var(--accent-sage);
+    color: var(--text-primary);
     margin-bottom: 4px;
+    line-height: 1.4;
   }
 
   .conn-meta {
+    display: flex;
+    justify-content: space-between;
     font-size: 10px;
     color: var(--text-muted);
+  }
+
+  .conn-rel {
+    text-transform: lowercase;
+  }
+
+  .conn-weight {
+    font-variant-numeric: tabular-nums;
   }
 </style>

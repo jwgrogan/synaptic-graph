@@ -2,82 +2,74 @@
   import { currentView } from "./stores";
 
   const views = [
-    { id: "galaxy" as const, label: "Synaptic Graph", icon: "\u2726" },
-    { id: "ghosts" as const, label: "External Graphs", icon: "\u25CC" },
-    { id: "fading" as const, label: "Fading", icon: "\u25CB" },
+    { id: "galaxy" as const, label: "Graph", icon: "\u2B21" },
+    { id: "fading" as const, label: "Fading", icon: "\u25D0" },
+    { id: "ghosts" as const, label: "External", icon: "\u25C7" },
     { id: "stats" as const, label: "Stats", icon: "\u25A6" },
-    { id: "import" as const, label: "Import", icon: "\u2B73" },
+    { id: "import" as const, label: "Import", icon: "\u2193" },
   ];
 </script>
 
 <nav class="sidebar">
-  <div class="logo">MG</div>
+  <div class="logo" title="Synaptic Graph">S</div>
   {#each views as view}
     <button
       class="nav-item"
       class:active={$currentView === view.id}
       on:click={() => currentView.set(view.id)}
+      title={view.label}
     >
-      <span class="nav-icon">{view.icon}</span>
-      <span class="nav-label">{view.label}</span>
+      {view.icon}
     </button>
   {/each}
 </nav>
 
 <style>
   .sidebar {
-    width: 56px;
+    width: 48px;
     background: var(--bg-surface);
     border-right: 1px solid var(--border-subtle);
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding-top: 12px;
-    gap: 4px;
+    padding: 16px 0;
+    gap: 2px;
     flex-shrink: 0;
   }
 
   .logo {
-    font-size: 14px;
-    font-weight: 700;
-    color: var(--accent-mauve-deep);
-    margin-bottom: 16px;
+    font-family: var(--font-display);
+    font-style: italic;
+    font-size: 20px;
+    font-weight: 300;
+    color: var(--text-primary);
+    margin-bottom: 20px;
     opacity: 0.7;
+    cursor: default;
   }
 
   .nav-item {
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
     border: none;
     background: transparent;
     color: var(--text-muted);
     cursor: pointer;
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
-    font: inherit;
+    font-size: 14px;
+    transition: all var(--transition-fast);
   }
 
   .nav-item:hover {
-    background: rgba(201, 169, 184, 0.15);
+    background: var(--bg-hover);
     color: var(--text-secondary);
   }
 
   .nav-item.active {
-    background: rgba(201, 169, 184, 0.2);
-    color: var(--accent-mauve);
-  }
-
-  .nav-icon {
-    font-size: 16px;
-  }
-
-  .nav-label {
-    font-size: 7px;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
+    background: var(--accent-primary-light);
+    color: var(--accent-primary);
   }
 </style>
