@@ -12,11 +12,27 @@ pub struct AppState {
 }
 
 fn default_db_path() -> PathBuf {
-    let mut path = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("synaptic-graph");
-    std::fs::create_dir_all(&path).ok();
-    path.push("memory.db");
-    path
+    // Check common locations in priority order:
+    // 1. ~/.local/share/synaptic-graph/memory.db (Linux convention, also used by MCP configs)
+    // 2. ~/Library/Application Support/synaptic-graph/memory.db (macOS dirs crate default)
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let linux_style = home.join(".local/share/synaptic-graph/memory.db");
+    if linux_style.exists() {
+        return linux_style;
+    }
+
+    let mac_style = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("synaptic-graph")
+        .join("memory.db");
+    if mac_style.exists() {
+        return mac_style;
+    }
+
+    // Neither exists — create at the linux-style path (matches MCP config convention)
+    let parent = home.join(".local/share/synaptic-graph");
+    std::fs::create_dir_all(&parent).ok();
+    parent.join("memory.db")
 }
 
 impl AppState {

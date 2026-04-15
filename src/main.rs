@@ -18,9 +18,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path = match std::env::var("MEMORY_GRAPH_DB") {
         Ok(p) if !p.is_empty() => std::path::PathBuf::from(p),
         _ => {
-            let base = dirs::data_local_dir()
-                .ok_or("Could not determine data_local_dir for this platform")?;
-            base.join("synaptic-graph").join("memory.db")
+            // Check ~/.local/share first (matches MCP config convention), then dirs default
+            let home = dirs::home_dir().ok_or("Could not determine home directory")?;
+            let linux_style = home.join(".local/share/synaptic-graph/memory.db");
+            if linux_style.exists() {
+                linux_style
+            } else {
+                let base = dirs::data_local_dir()
+                    .ok_or("Could not determine data_local_dir for this platform")?;
+                let mac_style = base.join("synaptic-graph").join("memory.db");
+                if mac_style.exists() {
+                    mac_style
+                } else {
+                    // Default to ~/.local/share for new installs
+                    home.join(".local/share/synaptic-graph/memory.db")
+                }
+            }
         }
     };
 
