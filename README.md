@@ -29,16 +29,27 @@ System: `memory_status`, `set_incognito`, `create_backup`, `sync_export`, `sync_
 
 ## Install
 
-### As an MCP server (Claude, GPT, any MCP client)
+### Quick install
 
 ```bash
-# Build from source
 git clone https://github.com/jwgrogan/synaptic-graph.git
 cd synaptic-graph
+./install.sh
+```
+
+The installer builds from source and configures your AI clients automatically.
+
+### Manual setup
+
+#### Build
+
+```bash
 cargo build --release
 ```
 
-Add to your MCP client config:
+#### Claude Code
+
+Add to `~/.mcp.json`:
 ```json
 {
   "mcpServers": {
@@ -49,6 +60,55 @@ Add to your MCP client config:
 }
 ```
 
+#### Claude Desktop
+
+Add to Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+```json
+{
+  "mcpServers": {
+    "synaptic-graph": {
+      "command": "/path/to/synaptic-graph/target/release/synaptic-graph"
+    }
+  }
+}
+```
+
+#### Codex
+
+Add to `~/.codex/config.json`:
+```json
+{
+  "mcpServers": {
+    "synaptic-graph": {
+      "command": "/path/to/synaptic-graph/target/release/synaptic-graph"
+    }
+  }
+}
+```
+
+The AGENTS.md file in this repo provides Codex with instructions for how to use the memory tools.
+
+#### Gemini CLI
+
+Add to your Gemini CLI MCP config. The GEMINI.md file in this repo provides Gemini with instructions for how to use the memory tools.
+
+#### OpenClaw
+
+OpenClaw uses the same MCP protocol as Claude Code. Add to your OpenClaw MCP config:
+```json
+{
+  "mcpServers": {
+    "synaptic-graph": {
+      "command": "/path/to/synaptic-graph/target/release/synaptic-graph"
+    }
+  }
+}
+```
+
+#### Any MCP-compatible client
+
+synaptic-graph is a standard MCP server over stdio. Point any MCP client at the binary — no additional configuration needed. The server embeds its own instructions via the MCP `ServerInfo.instructions` field.
+
 ### Desktop app
 
 ```bash
@@ -56,6 +116,15 @@ cd ui
 npm install
 npx tauri dev     # development
 npx tauri build   # production .dmg/.exe
+```
+
+### CLI
+
+The binary also works as a CLI:
+```bash
+synaptic-graph status              # show memory stats
+synaptic-graph retrieve "topic"    # search memories
+synaptic-graph save "content"      # save a memory
 ```
 
 ## How it works
