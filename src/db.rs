@@ -351,6 +351,13 @@ impl Database {
     }
 
     pub fn search_impulses_fts(&self, query: &str) -> SqlResult<Vec<(String, f64)>> {
+        // Convert multi-word queries to OR terms for broader matching
+        // FTS5 default is AND which is too strict for natural language queries
+        let fts_query = sanitize_fts_query(query);
+        if fts_query.is_empty() {
+            return Ok(vec![]);
+        }
+
         let mut stmt = self.conn.prepare(
             "SELECT i.id, fts.rank
              FROM impulses_fts fts
@@ -359,7 +366,7 @@ impl Database {
              AND i.status = 'confirmed'
              ORDER BY fts.rank",
         )?;
-        let rows = stmt.query_map(params![query], |row| {
+        let rows = stmt.query_map(params![fts_query], |row| {
             let id: String = row.get(0)?;
             let rank: f64 = row.get(1)?;
             Ok((id, rank))
@@ -551,6 +558,10 @@ impl Database {
     }
 
     pub fn search_ghost_nodes_fts(&self, query: &str) -> SqlResult<Vec<(String, f64)>> {
+        let fts_query = sanitize_fts_query(query);
+        if fts_query.is_empty() {
+            return Ok(vec![]);
+        }
         let mut stmt = self.conn.prepare(
             "SELECT gn.id, fts.rank
              FROM ghost_nodes_fts fts
@@ -558,7 +569,7 @@ impl Database {
              WHERE ghost_nodes_fts MATCH ?1
              ORDER BY fts.rank",
         )?;
-        let rows = stmt.query_map(params![query], |row| {
+        let rows = stmt.query_map(params![fts_query], |row| {
             let id: String = row.get(0)?;
             let rank: f64 = row.get(1)?;
             Ok((id, rank))
@@ -906,4 +917,37 @@ pub struct MemoryStats {
     pub confirmed_impulses: i64,
     pub candidate_impulses: i64,
     pub total_connections: i64,
+}
+
+// === FTS Query Helpers ===
+
+const FTS_STOP_WORDS: &[&str] = &[
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "could",
+    "should", "may", "might", "can", "to", "of", "in", "for", "on", "with",
+    "at", "by", "from", "as", "into", "through", "during", "before", "after",
+    "and", "or", "but", "not", "no", "so", "if", "then", "than", "too",
+    "very", "just", "about", "up", "out", "how", "what", "when", "where",
+    "who", "which", "that", "this", "it", "i", "me", "my", "you", "your",
+    "we", "our", "they", "them", "their", "he", "she", "his", "her",
+    "want", "think", "know", "like", "get", "make", "going",
+];
+
+/// Convert a natural language query into an FTS5-compatible OR query.
+/// Strips stop words, keeps significant terms, joins with OR.
+fn sanitize_fts_query(query: &str) -> String {
+    let stop: std::collections::HashSet<&str> = FTS_STOP_WORDS.iter().copied().collect();
+
+    let terms: Vec<String> = query
+        .split(|c: char| !c.is_alphanumeric())
+        .map(|w| w.to_lowercase())
+        .filter(|w| w.len() >= 3 && !stop.contains(w.as_str()))
+        .collect();
+
+    if terms.is_empty() {
+        return String::new();
+    }
+
+    // Join with OR for broad matching
+    terms.join(" OR ")
 }
