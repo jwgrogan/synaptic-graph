@@ -427,3 +427,119 @@ pub fn ui_unlink_memories(state: State<AppState>, connection_id: String) -> Resu
     ingestion::unlink(&db, &connection_id)?;
     Ok(serde_json::json!({"unlinked": connection_id}))
 }
+
+#[tauri::command]
+pub fn quick_save_import(
+    state: State<AppState>,
+    content: String,
+    impulse_type: String,
+    source_provider: Option<String>,
+) -> Result<serde_json::Value, String> {
+    use synaptic_graph::ingestion;
+    use synaptic_graph::models::*;
+
+    let itype = ImpulseType::from_str(&impulse_type).unwrap_or(ImpulseType::Observation);
+    let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+
+    // Use lower weight for imports — they're scaffolding, not understanding
+    let input = NewImpulse {
+        content: content.clone(),
+        impulse_type: itype,
+        initial_weight: 0.3, // Low weight — fades faster unless reinforced
+        emotional_valence: EmotionalValence::Neutral,
+        engagement_level: EngagementLevel::Low,
+        source_signals: vec![],
+        source_type: SourceType::ExplicitSave,
+        source_ref: "import".to_string(),
+        source_provider: source_provider.unwrap_or_else(|| "import".to_string()),
+        source_account: String::new(),
+    };
+
+    let impulse = db.insert_impulse(&input).map_err(|e| format!("DB: {}", e))?;
+    db.confirm_impulse(&impulse.id).map_err(|e| format!("Confirm: {}", e))?;
+
+    // Auto-link to existing memories
+    let _ = ingestion::auto_link(&db, &impulse.id);
+
+    // Auto-tag as "imported"
+    let _ = db.create_tag(&NewTag {
+        name: "imported".to_string(),
+        color: "#8E99A4".to_string(),
+    });
+    let _ = db.tag_impulse(&impulse.id, "imported");
+
+    Ok(serde_json::json!({
+        "id": impulse.id,
+        "content": impulse.content,
+        "weight": 0.3,
+        "status": "confirmed",
+    }))
+}
+
+#[tauri::command]
+pub fn analyze_memory_profile(state: State<AppState>) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|e| format!("Lock: {}", e))?;
+    let impulses = db.list_impulses(Some(ImpulseStatus::Confirmed))
+        .map_err(|e| format!("DB: {}", e))?;
+
+    let total = impulses.len();
+    let mut by_type: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut by_source: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut imported = 0;
+    let mut high_weight = 0;
+    let mut patterns = 0;
+    let mut heuristics = 0;
+
+    for imp in &impulses {
+        *by_type.entry(imp.impulse_type.as_str().to_string()).or_insert(0) += 1;
+        *by_source.entry(imp.source_provider.clone()).or_insert(0) += 1;
+        if imp.source_ref == "import" { imported += 1; }
+        if imp.weight >= 0.6 { high_weight += 1; }
+        if imp.impulse_type == ImpulseType::Pattern { patterns += 1; }
+        if imp.impulse_type == ImpulseType::Heuristic { heuristics += 1; }
+    }
+
+    let connections = db.connection_count().map_err(|e| format!("DB: {}", e))?;
+
+    // Build gap analysis
+    let mut gaps: Vec<String> = vec![];
+
+    if patterns == 0 {
+        gaps.push("No behavioral patterns recorded yet. These build over time as the AI observes how you think and work.".to_string());
+    }
+    if heuristics == 0 {
+        gaps.push("No deep insights yet. These are friend-level observations — contradictions, emotional patterns, growth edges.".to_string());
+    }
+    if total > 0 && imported > 0 && imported as f64 / total as f64 > 0.8 {
+        gaps.push(format!("{}% of your memories are imported. These are shallow facts that fade quickly. Deeper understanding builds from real conversations.", (imported as f64 / total as f64 * 100.0) as i32));
+    }
+    if connections < 5 {
+        gaps.push("Few connections between memories. As you use the system more, memories will link together into a richer understanding.".to_string());
+    }
+
+    // Build depth score (0-100)
+    let pattern_score = (patterns as f64 * 15.0).min(30.0);
+    let heuristic_score = (heuristics as f64 * 20.0).min(40.0);
+    let connection_score = (connections as f64 * 2.0).min(20.0);
+    let diversity_score = (by_type.len() as f64 * 2.0).min(10.0);
+    let depth_score = (pattern_score + heuristic_score + connection_score + diversity_score).min(100.0) as i32;
+
+    let depth_label = match depth_score {
+        0..=20 => "Surface — mostly facts, not much understanding yet",
+        21..=50 => "Building — some patterns emerging, keep going",
+        51..=75 => "Developing — real understanding forming",
+        _ => "Deep — rich relational model with patterns and insights",
+    };
+
+    Ok(serde_json::json!({
+        "total_memories": total,
+        "imported_count": imported,
+        "by_type": by_type,
+        "by_source": by_source,
+        "high_weight_count": high_weight,
+        "connections": connections,
+        "depth_score": depth_score,
+        "depth_label": depth_label,
+        "gaps": gaps,
+    }))
+}

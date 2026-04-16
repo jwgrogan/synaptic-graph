@@ -5,6 +5,7 @@
   let parsing = false;
   let imported: { content: string; type: string; status: string }[] = [];
   let error = "";
+  let analysis: any = null;
 
   const exportPrompt = `Export all of my stored memories and any context you've learned about me from past conversations. Preserve my words verbatim where possible, especially for instructions and preferences.
 
@@ -40,6 +41,12 @@ If no date is known, use [unknown] instead.
     setTimeout(() => { copied = false; }, 2000);
   }
 
+  function depthColor(score: number): string {
+    if (score < 30) return "var(--accent-rose)";
+    if (score < 60) return "var(--accent-amber, #D4A843)";
+    return "var(--accent-sage)";
+  }
+
   async function parseAndImport() {
     if (!importText.trim()) {
       error = "Paste your exported memories first";
@@ -49,6 +56,7 @@ If no date is known, use [unknown] instead.
     parsing = true;
     error = "";
     imported = [];
+    analysis = null;
 
     try {
       const lines = importText.split("\n");
@@ -92,19 +100,22 @@ If no date is known, use [unknown] instead.
 
       for (const entry of entries) {
         try {
-          await invoke("quick_save", {
-            params: {
-              content: entry.content,
-              impulse_type: entry.type,
-              emotional_valence: "neutral",
-              engagement_level: "medium",
-              source_ref: "import",
-            },
+          await invoke("quick_save_import", {
+            content: entry.content,
+            impulseType: entry.type,
+            sourceProvider: "import",
           });
           imported.push({ ...entry, status: "saved" });
         } catch (err) {
           imported.push({ ...entry, status: `failed: ${err}` });
         }
+      }
+
+      // Post-import analysis
+      try {
+        analysis = await invoke<any>("analyze_memory_profile");
+      } catch (err) {
+        // Non-fatal — just skip showing analysis
       }
     } catch (err) {
       error = `Parse error: ${err}`;
@@ -174,6 +185,37 @@ If no date is known, use [unknown] instead.
           <span class="result-status">{entry.status}</span>
         </div>
       {/each}
+    </div>
+  {/if}
+
+  {#if analysis}
+    <div class="analysis-section">
+      <h3>Memory Depth Analysis</h3>
+
+      <div class="depth-hero">
+        <div class="depth-score" style="color: {depthColor(analysis.depth_score)}">
+          {analysis.depth_score}
+        </div>
+        <div class="depth-meta">
+          <div class="depth-label">{analysis.depth_label}</div>
+          <div class="depth-counts">
+            {analysis.total_memories} total memories &middot; {analysis.imported_count} imported &middot; {analysis.connections} connections
+          </div>
+        </div>
+      </div>
+
+      {#if analysis.gaps && analysis.gaps.length > 0}
+        <div class="gaps-list">
+          {#each analysis.gaps as gap}
+            <div class="gap-card">{gap}</div>
+          {/each}
+        </div>
+      {/if}
+
+      <p class="scaffolding-message">
+        Imported memories are scaffolding — they start with low weight and fade faster unless reinforced.
+        The real value builds from conversations where synaptic-graph observes how you think, not just what you know.
+      </p>
     </div>
   {/if}
 </div>
@@ -356,5 +398,74 @@ If no date is known, use [unknown] instead.
 
   .result-item.failed .result-status {
     color: var(--accent-rose);
+  }
+
+  /* Analysis section */
+  .analysis-section {
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .analysis-section h3 {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 16px;
+  }
+
+  .depth-hero {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-bottom: 20px;
+  }
+
+  .depth-score {
+    font-family: var(--font-body);
+    font-size: 48px;
+    font-weight: 300;
+    line-height: 1;
+  }
+
+  .depth-meta {
+    flex: 1;
+  }
+
+  .depth-label {
+    font-size: 13px;
+    color: var(--text-primary);
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+
+  .depth-counts {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .gaps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
+  .gap-card {
+    font-size: 12px;
+    color: var(--text-secondary);
+    padding: 10px 14px;
+    background: var(--bg-panel-solid);
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--accent-rose);
+    border-radius: var(--radius-sm);
+  }
+
+  .scaffolding-message {
+    font-size: 12px;
+    font-style: italic;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin-top: 16px;
   }
 </style>

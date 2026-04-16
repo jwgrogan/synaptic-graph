@@ -30,6 +30,8 @@ fn main() {
             commands::ui_untag_impulse,
             commands::ui_link_memories,
             commands::ui_unlink_memories,
+            commands::quick_save_import,
+            commands::analyze_memory_profile,
         ])
         .run(tauri::generate_context!())
         .expect("error while running memory-graph-ui");
