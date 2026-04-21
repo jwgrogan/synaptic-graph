@@ -8,19 +8,16 @@ use crate::redaction;
 
 // Common stop words to exclude from keyword matching
 const STOP_WORDS: &[&str] = &[
-    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "will", "would", "could",
-    "should", "may", "might", "shall", "can", "need", "dare", "ought",
-    "used", "to", "of", "in", "for", "on", "with", "at", "by", "from",
-    "as", "into", "through", "during", "before", "after", "above", "below",
-    "between", "out", "off", "over", "under", "again", "further", "then",
-    "once", "here", "there", "when", "where", "why", "how", "all", "each",
-    "every", "both", "few", "more", "most", "other", "some", "such", "no",
-    "nor", "not", "only", "own", "same", "so", "than", "too", "very",
-    "just", "because", "but", "and", "or", "if", "while", "that", "this",
-    "these", "those", "it", "its", "my", "your", "his", "her", "our",
-    "their", "what", "which", "who", "whom", "i", "me", "we", "you",
-    "he", "she", "they", "them", "about", "up",
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "will", "would", "could", "should", "may", "might", "shall", "can",
+    "need", "dare", "ought", "used", "to", "of", "in", "for", "on", "with", "at", "by", "from",
+    "as", "into", "through", "during", "before", "after", "above", "below", "between", "out",
+    "off", "over", "under", "again", "further", "then", "once", "here", "there", "when", "where",
+    "why", "how", "all", "each", "every", "both", "few", "more", "most", "other", "some", "such",
+    "no", "nor", "not", "only", "own", "same", "so", "than", "too", "very", "just", "because",
+    "but", "and", "or", "if", "while", "that", "this", "these", "those", "it", "its", "my", "your",
+    "his", "her", "our", "their", "what", "which", "who", "whom", "i", "me", "we", "you", "he",
+    "she", "they", "them", "about", "up",
 ];
 
 /// Save content as a candidate impulse with redaction applied.
@@ -243,7 +240,8 @@ fn extract_keywords(text: &str) -> HashSet<String> {
 /// Uses keyword overlap: shared significant words create connections.
 /// Connection weight scales with overlap ratio. Returns number of connections created.
 pub fn auto_link(db: &Database, impulse_id: &str) -> Result<usize, String> {
-    let impulse = db.get_impulse(impulse_id)
+    let impulse = db
+        .get_impulse(impulse_id)
         .map_err(|e| format!("Impulse not found: {}", e))?;
 
     let new_keywords = extract_keywords(&impulse.content);
@@ -251,12 +249,15 @@ pub fn auto_link(db: &Database, impulse_id: &str) -> Result<usize, String> {
         return Ok(0);
     }
 
-    let existing = db.list_impulses(Some(ImpulseStatus::Confirmed))
+    let existing = db
+        .list_impulses(Some(ImpulseStatus::Confirmed))
         .map_err(|e| format!("Failed to list impulses: {}", e))?;
 
-    let existing_conns = db.get_connections_for_node(impulse_id)
+    let existing_conns = db
+        .get_connections_for_node(impulse_id)
         .map_err(|e| format!("Failed to get connections: {}", e))?;
-    let already_connected: HashSet<String> = existing_conns.iter()
+    let already_connected: HashSet<String> = existing_conns
+        .iter()
         .flat_map(|c| vec![c.source_id.clone(), c.target_id.clone()])
         .collect();
 
@@ -307,8 +308,10 @@ pub fn manual_link(
     relationship: &str,
     weight: f64,
 ) -> Result<Connection, String> {
-    db.get_impulse(source_id).map_err(|e| format!("Source not found: {}", e))?;
-    db.get_impulse(target_id).map_err(|e| format!("Target not found: {}", e))?;
+    db.get_impulse(source_id)
+        .map_err(|e| format!("Source not found: {}", e))?;
+    db.get_impulse(target_id)
+        .map_err(|e| format!("Target not found: {}", e))?;
 
     let conn = NewConnection {
         source_id: source_id.to_string(),

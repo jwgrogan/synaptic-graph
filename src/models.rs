@@ -287,14 +287,224 @@ pub struct RetrievalRequest {
 pub struct RetrievedMemory {
     pub impulse: Impulse,
     pub activation_score: f64,
+    pub confidence_score: f64,
+    pub ranking_score: f64,
     pub activation_path: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeedbackKind {
+    Helpful,
+    Unhelpful,
+}
+
+impl FeedbackKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Helpful => "helpful",
+            Self::Unhelpful => "unhelpful",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "helpful" => Some(Self::Helpful),
+            "unhelpful" => Some(Self::Unhelpful),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvidenceSet {
+    pub id: String,
+    pub query: String,
+    pub response_hash: String,
+    pub node_ids: Vec<String>,
+    pub edge_ids: Vec<String>,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetrievalResult {
     pub memories: Vec<RetrievedMemory>,
+    pub skills: Vec<RetrievedSkill>,
     pub total_nodes_activated: usize,
     pub ghost_activations: Vec<GhostActivation>,
+    pub evidence_set: Option<EvidenceSet>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeedbackRecord {
+    pub id: String,
+    pub evidence_set_id: String,
+    pub target_node_id: Option<String>,
+    pub target_edge_id: Option<String>,
+    pub feedback_kind: FeedbackKind,
+    pub idempotency_key: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReflectionMemoryItem {
+    pub node_id: String,
+    pub content: String,
+    pub impulse_type: String,
+    pub status: String,
+    pub weight: f64,
+    pub confidence: f64,
+    pub effective_confidence: f64,
+    pub helpful_count: i64,
+    pub unhelpful_count: i64,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReflectionGhostItem {
+    pub node_id: String,
+    pub source_graph: String,
+    pub external_ref: String,
+    pub title: String,
+    pub weight: f64,
+    pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReflectionRelationship {
+    pub edge_id: String,
+    pub source_id: String,
+    pub target_id: String,
+    pub relationship: String,
+    pub weight: f64,
+    pub confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReflectionAssessmentItem {
+    pub assessment_id: String,
+    pub assessment_type: String,
+    pub status: String,
+    pub subject_node_id: String,
+    pub object_node_id: Option<String>,
+    pub confidence: f64,
+    pub rationale: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReflectionSkillItem {
+    pub node_id: String,
+    pub name: String,
+    pub description: String,
+    pub trigger: String,
+    pub steps: Vec<String>,
+    pub constraints: Vec<String>,
+    pub weight: f64,
+    pub confidence: f64,
+    pub effective_confidence: f64,
+    pub evidence_node_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReflectionPacket {
+    pub evidence_set_id: String,
+    pub query: String,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub memory_items: Vec<ReflectionMemoryItem>,
+    pub skill_items: Vec<ReflectionSkillItem>,
+    pub ghost_items: Vec<ReflectionGhostItem>,
+    pub relationships: Vec<ReflectionRelationship>,
+    pub assessment_items: Vec<ReflectionAssessmentItem>,
+    pub truncated: bool,
+    pub instruction: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillPayload {
+    pub node_id: String,
+    pub name: String,
+    pub description: String,
+    pub trigger: String,
+    pub steps: Vec<String>,
+    pub constraints: Vec<String>,
+    pub metadata: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetrievedSkill {
+    pub skill: SkillPayload,
+    pub weight: f64,
+    pub confidence: f64,
+    pub effective_confidence: f64,
+    pub ranking_score: f64,
+    pub evidence_node_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssessmentType {
+    Contradiction,
+}
+
+impl AssessmentType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Contradiction => "contradiction",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "contradiction" => Some(Self::Contradiction),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AssessmentStatus {
+    Candidate,
+    Confirmed,
+    Dismissed,
+}
+
+impl AssessmentStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Candidate => "candidate",
+            Self::Confirmed => "confirmed",
+            Self::Dismissed => "dismissed",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "candidate" => Some(Self::Candidate),
+            "confirmed" => Some(Self::Confirmed),
+            "dismissed" => Some(Self::Dismissed),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Assessment {
+    pub id: String,
+    pub subject_node_id: String,
+    pub object_node_id: Option<String>,
+    pub assessment_type: AssessmentType,
+    pub status: AssessmentStatus,
+    pub confidence: f64,
+    pub rationale: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub dismissed_at: Option<DateTime<Utc>>,
 }
 
 // === Weight Constants ===
@@ -307,9 +517,9 @@ pub const WEIGHT_FLOOR: f64 = 0.001;
 pub const REINFORCEMENT_BUMP: f64 = 0.05;
 
 // Decay rates (lambda) -- per hour
-pub const DECAY_SEMANTIC: f64 = 0.0005;   // slow: ~1386 hours half-life (~58 days)
-pub const DECAY_EPISODIC: f64 = 0.005;    // fast: ~139 hours half-life (~6 days)
-pub const DECAY_GHOST: f64 = 0.002;       // medium: ~347 hours half-life (~14 days)
+pub const DECAY_SEMANTIC: f64 = 0.0005; // slow: ~1386 hours half-life (~58 days)
+pub const DECAY_EPISODIC: f64 = 0.005; // fast: ~139 hours half-life (~6 days)
+pub const DECAY_GHOST: f64 = 0.002; // medium: ~347 hours half-life (~14 days)
 
 // Activation constants
 pub const ACTIVATION_THRESHOLD: f64 = 0.1;

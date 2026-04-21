@@ -77,6 +77,21 @@ fn seed_graph(db: &synaptic_graph::db::Database) -> (String, String, String) {
     (a.id, b.id, c.id)
 }
 
+fn memory_score(result: &RetrievalResult, node_id: &str) -> Option<f64> {
+    result
+        .memories
+        .iter()
+        .find(|memory| memory.impulse.id == node_id)
+        .map(|memory| memory.ranking_score)
+}
+
+fn memory_position(result: &RetrievalResult, node_id: &str) -> Option<usize> {
+    result
+        .memories
+        .iter()
+        .position(|memory| memory.impulse.id == node_id)
+}
+
 #[test]
 fn test_direct_match_returns_result() {
     let db = common::test_db();
@@ -98,7 +113,7 @@ fn test_direct_match_returns_result() {
 #[test]
 fn test_activation_spreads_to_connected_nodes() {
     let db = common::test_db();
-    let (a_id, b_id, _) = seed_graph(&db);
+    let (_a_id, b_id, _) = seed_graph(&db);
 
     let engine = ActivationEngine::new(&db);
     let request = RetrievalRequest {
@@ -190,7 +205,8 @@ fn test_deleted_impulses_excluded() {
     let db = common::test_db();
     let (a_id, _, _) = seed_graph(&db);
 
-    db.update_impulse_status(&a_id, ImpulseStatus::Deleted).unwrap();
+    db.update_impulse_status(&a_id, ImpulseStatus::Deleted)
+        .unwrap();
 
     let engine = ActivationEngine::new(&db);
     let request = RetrievalRequest {
@@ -202,6 +218,60 @@ fn test_deleted_impulses_excluded() {
     let result = engine.retrieve(&request).unwrap();
     // Deleted node should not appear in results
     assert!(!result.memories.iter().any(|m| m.impulse.id == a_id));
+}
+
+#[test]
+fn test_superseded_impulses_excluded() {
+    let db = common::test_db();
+
+    let active = db
+        .insert_impulse(&NewImpulse {
+            content: "Lifecycle memory active".to_string(),
+            impulse_type: ImpulseType::Heuristic,
+            initial_weight: 0.7,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
+    db.confirm_impulse(&active.id).unwrap();
+
+    let superseded = db
+        .insert_impulse(&NewImpulse {
+            content: "Lifecycle memory superseded".to_string(),
+            impulse_type: ImpulseType::Heuristic,
+            initial_weight: 0.7,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
+    db.confirm_impulse(&superseded.id).unwrap();
+    db.update_impulse_status(&superseded.id, ImpulseStatus::Superseded)
+        .unwrap();
+
+    let engine = ActivationEngine::new(&db);
+    let result = engine
+        .retrieve_read_only(&RetrievalRequest {
+            query: "Lifecycle memory".to_string(),
+            max_results: 10,
+            max_hops: 3,
+        })
+        .unwrap();
+
+    assert!(result.memories.iter().any(|m| m.impulse.id == active.id));
+    assert!(!result
+        .memories
+        .iter()
+        .any(|m| m.impulse.id == superseded.id));
 }
 
 #[test]
@@ -331,6 +401,271 @@ fn test_retrieval_reinforces_traversed_connections() {
     // Connection should have been reinforced
     assert!(ab_conn.weight >= weight_before);
     assert!(ab_conn.traversal_count > count_before);
+}
+
+#[test]
+fn test_read_only_retrieval_skips_reinforcement() {
+    let db = common::test_db();
+    let (a_id, b_id, _) = seed_graph(&db);
+
+    let conns_before = db.get_connections_for_node(&a_id).unwrap();
+    let weight_before = conns_before[0].weight;
+    let count_before = conns_before[0].traversal_count;
+
+    let engine = ActivationEngine::new(&db);
+    let request = RetrievalRequest {
+        query: "Rust memory".to_string(),
+        max_results: 10,
+        max_hops: 3,
+    };
+
+    let result = engine.retrieve_read_only(&request).unwrap();
+    assert!(result.evidence_set.is_none());
+
+    let conns_after = db.get_connections_for_node(&a_id).unwrap();
+    let ab_conn = conns_after
+        .iter()
+        .find(|c| {
+            (c.source_id == a_id && c.target_id == b_id)
+                || (c.source_id == b_id && c.target_id == a_id)
+        })
+        .unwrap();
+
+    assert_eq!(ab_conn.weight, weight_before);
+    assert_eq!(ab_conn.traversal_count, count_before);
+}
+
+#[test]
+fn test_feedback_confidence_affects_ranking_after_threshold() {
+    let db = common::test_db();
+
+    let memory_a = db
+        .insert_impulse(&NewImpulse {
+            content: "SQLite local durability patterns".to_string(),
+            impulse_type: ImpulseType::Heuristic,
+            initial_weight: 0.7,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
+    db.confirm_impulse(&memory_a.id).unwrap();
+
+    let memory_b = db
+        .insert_impulse(&NewImpulse {
+            content: "SQLite local durability patterns".to_string(),
+            impulse_type: ImpulseType::Heuristic,
+            initial_weight: 0.7,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
+    db.confirm_impulse(&memory_b.id).unwrap();
+
+    for _ in 0..3 {
+        db.apply_feedback_to_node(&memory_a.id, FeedbackKind::Unhelpful)
+            .unwrap();
+    }
+
+    let engine = ActivationEngine::new(&db);
+    let result = engine
+        .retrieve(&RetrievalRequest {
+            query: "SQLite durability".to_string(),
+            max_results: 10,
+            max_hops: 3,
+        })
+        .unwrap();
+
+    let first = result.memories.first().unwrap();
+    assert_eq!(first.impulse.id, memory_b.id);
+
+    let demoted = result
+        .memories
+        .iter()
+        .find(|memory| memory.impulse.id == memory_a.id)
+        .unwrap();
+    assert!(demoted.confidence_score < 0.5);
+    assert!(demoted.ranking_score < first.ranking_score);
+}
+
+#[test]
+fn test_confirmed_contradictions_reduce_ranking_but_candidates_do_not() {
+    let db = common::test_db();
+
+    let primary = db
+        .insert_impulse(&NewImpulse {
+            content: "Rust memory ranking baseline".to_string(),
+            impulse_type: ImpulseType::Heuristic,
+            initial_weight: 0.7,
+            emotional_valence: EmotionalValence::Positive,
+            engagement_level: EngagementLevel::High,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
+    db.confirm_impulse(&primary.id).unwrap();
+
+    let contradiction_peer = db
+        .insert_impulse(&NewImpulse {
+            content: "Gardening notes about tomatoes".to_string(),
+            impulse_type: ImpulseType::Observation,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
+    db.confirm_impulse(&contradiction_peer.id).unwrap();
+
+    let engine = ActivationEngine::new(&db);
+    let request = RetrievalRequest {
+        query: "Rust memory ranking".to_string(),
+        max_results: 10,
+        max_hops: 3,
+    };
+
+    let baseline = engine.retrieve_read_only(&request).unwrap();
+    let baseline_score = memory_score(&baseline, &primary.id).unwrap();
+
+    let candidate = db
+        .upsert_pair_assessment(
+            AssessmentType::Contradiction,
+            &primary.id,
+            &contradiction_peer.id,
+            0.92,
+            "possible conflict",
+        )
+        .unwrap();
+    assert_eq!(candidate.status, AssessmentStatus::Candidate);
+
+    let candidate_result = engine.retrieve_read_only(&request).unwrap();
+    let candidate_score = memory_score(&candidate_result, &primary.id).unwrap();
+    assert!((candidate_score - baseline_score).abs() < 1e-12);
+
+    db.set_assessment_status(&candidate.id, AssessmentStatus::Confirmed)
+        .unwrap();
+
+    let confirmed_result = engine.retrieve_read_only(&request).unwrap();
+    let confirmed_score = memory_score(&confirmed_result, &primary.id).unwrap();
+    assert!(confirmed_score < candidate_score);
+}
+
+#[test]
+fn test_unaffected_nodes_keep_relative_order_when_penalty_applied() {
+    let db = common::test_db();
+
+    let top = db
+        .insert_impulse(&NewImpulse {
+            content: "Ordering memory baseline".to_string(),
+            impulse_type: ImpulseType::Heuristic,
+            initial_weight: 0.8,
+            emotional_valence: EmotionalValence::Positive,
+            engagement_level: EngagementLevel::High,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
+    db.confirm_impulse(&top.id).unwrap();
+
+    let second = db
+        .insert_impulse(&NewImpulse {
+            content: "Ordering memory baseline".to_string(),
+            impulse_type: ImpulseType::Heuristic,
+            initial_weight: 0.8,
+            emotional_valence: EmotionalValence::Positive,
+            engagement_level: EngagementLevel::High,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
+    db.confirm_impulse(&second.id).unwrap();
+    for _ in 0..3 {
+        db.apply_feedback_to_node(&second.id, FeedbackKind::Unhelpful)
+            .unwrap();
+    }
+
+    let contradicted = db
+        .insert_impulse(&NewImpulse {
+            content: "Ordering memory baseline".to_string(),
+            impulse_type: ImpulseType::Heuristic,
+            initial_weight: 0.8,
+            emotional_valence: EmotionalValence::Positive,
+            engagement_level: EngagementLevel::High,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
+    db.confirm_impulse(&contradicted.id).unwrap();
+
+    let contradiction_peer = db
+        .insert_impulse(&NewImpulse {
+            content: "Unrelated contradiction target".to_string(),
+            impulse_type: ImpulseType::Observation,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
+    db.confirm_impulse(&contradiction_peer.id).unwrap();
+
+    let engine = ActivationEngine::new(&db);
+    let request = RetrievalRequest {
+        query: "Ordering memory baseline".to_string(),
+        max_results: 10,
+        max_hops: 3,
+    };
+
+    let before = engine.retrieve_read_only(&request).unwrap();
+    let top_before = memory_position(&before, &top.id).unwrap();
+    let second_before = memory_position(&before, &second.id).unwrap();
+    assert!(top_before < second_before);
+
+    let candidate = db
+        .upsert_pair_assessment(
+            AssessmentType::Contradiction,
+            &contradicted.id,
+            &contradiction_peer.id,
+            0.9,
+            "candidate contradiction",
+        )
+        .unwrap();
+    db.set_assessment_status(&candidate.id, AssessmentStatus::Confirmed)
+        .unwrap();
+
+    let after = engine.retrieve_read_only(&request).unwrap();
+    let top_after = memory_position(&after, &top.id).unwrap();
+    let second_after = memory_position(&after, &second.id).unwrap();
+    assert!(top_after < second_after);
 }
 
 #[test]
@@ -520,10 +855,7 @@ fn test_activation_with_disconnected_clusters() {
         .memories
         .iter()
         .any(|m| m.impulse.content.contains("PostgreSQL"));
-    assert!(
-        !has_postgres,
-        "Disconnected cluster should not activate"
-    );
+    assert!(!has_postgres, "Disconnected cluster should not activate");
 }
 
 #[test]

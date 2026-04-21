@@ -54,11 +54,26 @@ fn test_reinforce_from_floor() {
 
 #[test]
 fn test_decay_rate_for_impulse_type() {
-    assert_eq!(weight::decay_rate_for_type(ImpulseType::Heuristic), DECAY_SEMANTIC);
-    assert_eq!(weight::decay_rate_for_type(ImpulseType::Preference), DECAY_SEMANTIC);
-    assert_eq!(weight::decay_rate_for_type(ImpulseType::Decision), DECAY_SEMANTIC);
-    assert_eq!(weight::decay_rate_for_type(ImpulseType::Pattern), DECAY_SEMANTIC);
-    assert_eq!(weight::decay_rate_for_type(ImpulseType::Observation), DECAY_EPISODIC);
+    assert_eq!(
+        weight::decay_rate_for_type(ImpulseType::Heuristic),
+        DECAY_SEMANTIC
+    );
+    assert_eq!(
+        weight::decay_rate_for_type(ImpulseType::Preference),
+        DECAY_SEMANTIC
+    );
+    assert_eq!(
+        weight::decay_rate_for_type(ImpulseType::Decision),
+        DECAY_SEMANTIC
+    );
+    assert_eq!(
+        weight::decay_rate_for_type(ImpulseType::Pattern),
+        DECAY_SEMANTIC
+    );
+    assert_eq!(
+        weight::decay_rate_for_type(ImpulseType::Observation),
+        DECAY_EPISODIC
+    );
 }
 
 // --- Edge case tests for weight mechanics (Phase 4, Task 3) ---
@@ -107,10 +122,18 @@ fn test_decay_over_one_year() {
     let episodic = weight::effective_weight(1.0, 8760.0, DECAY_EPISODIC);
 
     // Semantic should still be meaningful after a year
-    assert!(semantic > 0.01, "Semantic memory should persist over a year: {}", semantic);
+    assert!(
+        semantic > 0.01,
+        "Semantic memory should persist over a year: {}",
+        semantic
+    );
 
     // Episodic should be near floor
-    assert!(episodic < 0.01, "Episodic memory should fade within a year: {}", episodic);
+    assert!(
+        episodic < 0.01,
+        "Episodic memory should fade within a year: {}",
+        episodic
+    );
 
     // Both above floor
     assert!(semantic >= WEIGHT_FLOOR);

@@ -20,21 +20,37 @@ mod pull_tests {
         let mut f = fs::File::create(&design_path).unwrap();
         writeln!(f, "# Design Overview").unwrap();
         writeln!(f, "").unwrap();
-        writeln!(f, "This document describes the architecture of the system in detail.").unwrap();
+        writeln!(
+            f,
+            "This document describes the architecture of the system in detail."
+        )
+        .unwrap();
         writeln!(f, "").unwrap();
         writeln!(f, "# Components").unwrap();
         writeln!(f, "").unwrap();
-        writeln!(f, "The system has several components that work together for processing.").unwrap();
+        writeln!(
+            f,
+            "The system has several components that work together for processing."
+        )
+        .unwrap();
         writeln!(f, "").unwrap();
         writeln!(f, "# Deployment").unwrap();
         writeln!(f, "").unwrap();
-        writeln!(f, "Deployment uses containers and orchestration tooling for reliability.").unwrap();
+        writeln!(
+            f,
+            "Deployment uses containers and orchestration tooling for reliability."
+        )
+        .unwrap();
 
         let arch_path = dir.path().join("architecture.md");
         let mut f = fs::File::create(&arch_path).unwrap();
         writeln!(f, "# Architecture Notes").unwrap();
         writeln!(f, "").unwrap();
-        writeln!(f, "The architecture follows a layered pattern with clear boundaries.").unwrap();
+        writeln!(
+            f,
+            "The architecture follows a layered pattern with clear boundaries."
+        )
+        .unwrap();
 
         // Register ghost source
         let root = dir.path().to_str().unwrap();
@@ -68,13 +84,14 @@ mod pull_tests {
     #[test]
     fn test_pull_through_reads_file_content() {
         let (db, dir) = setup_ghost_vault();
-        let node = db
-            .get_ghost_node_by_ref("test-vault", "design.md")
-            .unwrap();
+        let node = db.get_ghost_node_by_ref("test-vault", "design.md").unwrap();
         let root = dir.path().to_str().unwrap();
 
         let content = pull_ghost_content(&db, &node, root, PullMode::SessionOnly).unwrap();
-        assert!(content.contains("Design"), "Content should contain 'Design'");
+        assert!(
+            content.contains("Design"),
+            "Content should contain 'Design'"
+        );
         assert!(
             content.contains("architecture"),
             "Content should contain 'architecture'"
@@ -84,9 +101,7 @@ mod pull_tests {
     #[test]
     fn test_pull_through_permanent_creates_impulses() {
         let (db, _dir) = setup_ghost_vault();
-        let node = db
-            .get_ghost_node_by_ref("test-vault", "design.md")
-            .unwrap();
+        let node = db.get_ghost_node_by_ref("test-vault", "design.md").unwrap();
         let sources = db.list_ghost_sources().unwrap();
         let root = &sources[0].root_path;
 
@@ -102,9 +117,7 @@ mod pull_tests {
         );
 
         // Impulses should be extracted (not raw file copy) and confirmed
-        let impulses = db
-            .list_impulses(Some(ImpulseStatus::Confirmed))
-            .unwrap();
+        let impulses = db.list_impulses(Some(ImpulseStatus::Confirmed)).unwrap();
         let pulled: Vec<_> = impulses
             .iter()
             .filter(|i| i.source_type == SourceType::PullThrough)
@@ -140,9 +153,7 @@ mod pull_tests {
     #[test]
     fn test_pull_through_updates_ghost_weight() {
         let (db, _dir) = setup_ghost_vault();
-        let node = db
-            .get_ghost_node_by_ref("test-vault", "design.md")
-            .unwrap();
+        let node = db.get_ghost_node_by_ref("test-vault", "design.md").unwrap();
         let weight_before = node.weight;
         let sources = db.list_ghost_sources().unwrap();
         let root = &sources[0].root_path;

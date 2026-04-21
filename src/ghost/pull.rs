@@ -55,7 +55,8 @@ pub fn pull_ghost_content(
                 source_account: ghost_node.source_graph.clone(),
             };
 
-            let impulse = db.insert_impulse(&input)
+            let impulse = db
+                .insert_impulse(&input)
                 .map_err(|e| format!("Failed to create impulse from pull: {}", e))?;
             db.confirm_impulse(&impulse.id)
                 .map_err(|e| format!("Failed to confirm: {}", e))?;

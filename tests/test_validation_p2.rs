@@ -1,5 +1,6 @@
 mod common;
 
+use std::fs;
 use synaptic_graph::activation::ActivationEngine;
 use synaptic_graph::extraction::{self, EngagementSignals, ExtractionDepth};
 use synaptic_graph::ghost;
@@ -7,7 +8,6 @@ use synaptic_graph::ghost::pull::{pull_ghost_content, PullMode};
 use synaptic_graph::ghost::scanner::ScanConfig;
 use synaptic_graph::ingestion;
 use synaptic_graph::models::*;
-use std::fs;
 use tempfile::TempDir;
 
 fn create_validation_vault() -> TempDir {
@@ -27,13 +27,15 @@ fn create_validation_vault() -> TempDir {
     fs::write(
         root.join("rust-patterns.md"),
         "# Rust Patterns\n\nOwnership, borrowing, and lifetimes for safe memory management.\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     fs::create_dir(root.join("private")).unwrap();
     fs::write(
         root.join("private/secrets.md"),
         "# Secrets\n\nAPI key: AKIAIOSFODNN7EXAMPLE\nDo not share.\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     dir
 }
@@ -57,7 +59,8 @@ fn validation_p2_ghost_maps_topology_no_content() {
         vault.path().to_str().unwrap(),
         "obsidian",
         &config,
-    ).unwrap();
+    )
+    .unwrap();
 
     let nodes = db.list_ghost_nodes_by_source("validation-vault").unwrap();
 
@@ -68,7 +71,10 @@ fn validation_p2_ghost_maps_topology_no_content() {
     assert_eq!(db.impulse_count().unwrap(), 0);
 
     // Nodes should have titles and metadata but not full content
-    let design = nodes.iter().find(|n| n.title == "Design Philosophy").unwrap();
+    let design = nodes
+        .iter()
+        .find(|n| n.title == "Design Philosophy")
+        .unwrap();
     assert!(!design.external_ref.is_empty());
 }
 
@@ -91,7 +97,8 @@ fn validation_p2_pull_through_on_query() {
         vault.path().to_str().unwrap(),
         "obsidian",
         &config,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Add a related impulse to the memory graph
     ingestion::save_and_confirm(
@@ -102,14 +109,17 @@ fn validation_p2_pull_through_on_query() {
         EngagementLevel::High,
         vec![],
         "test",
-    ).unwrap();
+    )
+    .unwrap();
 
     let engine = ActivationEngine::new(&db);
-    let result = engine.retrieve(&RetrievalRequest {
-        query: "design philosophy".to_string(),
-        max_results: 10,
-        max_hops: 2,
-    }).unwrap();
+    let result = engine
+        .retrieve(&RetrievalRequest {
+            query: "design philosophy".to_string(),
+            max_results: 10,
+            max_hops: 2,
+        })
+        .unwrap();
 
     // Should have ghost activations for the design philosophy note
     assert!(
@@ -140,16 +150,28 @@ fn validation_p2_session_only_no_trace() {
         ignore_patterns: vec![],
     };
 
-    ghost::register_and_scan(&db, "v-vault", vault.path().to_str().unwrap(), "obsidian", &config).unwrap();
+    ghost::register_and_scan(
+        &db,
+        "v-vault",
+        vault.path().to_str().unwrap(),
+        "obsidian",
+        &config,
+    )
+    .unwrap();
 
     let before = db.impulse_count().unwrap();
 
-    let node = db.get_ghost_node_by_ref("v-vault", "architecture.md").unwrap();
+    let node = db
+        .get_ghost_node_by_ref("v-vault", "architecture.md")
+        .unwrap();
     let sources = db.list_ghost_sources().unwrap();
     pull_ghost_content(&db, &node, &sources[0].root_path, PullMode::SessionOnly).unwrap();
 
     let after = db.impulse_count().unwrap();
-    assert_eq!(before, after, "Session-only pull should not create impulses");
+    assert_eq!(
+        before, after,
+        "Session-only pull should not create impulses"
+    );
 }
 
 // ============================================================
@@ -165,11 +187,20 @@ fn validation_p2_permanent_pull_creates_node() {
         ignore_patterns: vec![],
     };
 
-    ghost::register_and_scan(&db, "v-vault", vault.path().to_str().unwrap(), "obsidian", &config).unwrap();
+    ghost::register_and_scan(
+        &db,
+        "v-vault",
+        vault.path().to_str().unwrap(),
+        "obsidian",
+        &config,
+    )
+    .unwrap();
 
     let before = db.impulse_count().unwrap();
 
-    let node = db.get_ghost_node_by_ref("v-vault", "rust-patterns.md").unwrap();
+    let node = db
+        .get_ghost_node_by_ref("v-vault", "rust-patterns.md")
+        .unwrap();
     let sources = db.list_ghost_sources().unwrap();
     pull_ghost_content(&db, &node, &sources[0].root_path, PullMode::Permanent).unwrap();
 
@@ -178,7 +209,9 @@ fn validation_p2_permanent_pull_creates_node() {
 
     // The created impulse should have pull_through source type
     let impulses = db.list_impulses(None).unwrap();
-    let pulled = impulses.iter().find(|i| i.source_type == SourceType::PullThrough);
+    let pulled = impulses
+        .iter()
+        .find(|i| i.source_type == SourceType::PullThrough);
     assert!(pulled.is_some());
     assert!(pulled.unwrap().source_ref.contains("v-vault"));
 }
@@ -200,7 +233,10 @@ fn validation_p2_adaptive_extraction_scales() {
         decision_keywords_found: 0,
         emotional_keywords_found: 0,
     };
-    assert_eq!(extraction::assess_engagement(&low), ExtractionDepth::Minimal);
+    assert_eq!(
+        extraction::assess_engagement(&low),
+        ExtractionDepth::Minimal
+    );
     assert_eq!(ExtractionDepth::Minimal.max_proposals(), 1);
 
     // High engagement (like this design conversation)
@@ -234,19 +270,32 @@ fn validation_p2_ghost_weight_learns_from_access() {
         ignore_patterns: vec![],
     };
 
-    ghost::register_and_scan(&db, "v-vault", vault.path().to_str().unwrap(), "obsidian", &config).unwrap();
+    ghost::register_and_scan(
+        &db,
+        "v-vault",
+        vault.path().to_str().unwrap(),
+        "obsidian",
+        &config,
+    )
+    .unwrap();
 
-    let node = db.get_ghost_node_by_ref("v-vault", "design-philosophy.md").unwrap();
+    let node = db
+        .get_ghost_node_by_ref("v-vault", "design-philosophy.md")
+        .unwrap();
     let initial_weight = node.weight;
     let sources = db.list_ghost_sources().unwrap();
 
     // Pull multiple times
     for _ in 0..5 {
-        let n = db.get_ghost_node_by_ref("v-vault", "design-philosophy.md").unwrap();
+        let n = db
+            .get_ghost_node_by_ref("v-vault", "design-philosophy.md")
+            .unwrap();
         pull_ghost_content(&db, &n, &sources[0].root_path, PullMode::SessionOnly).unwrap();
     }
 
-    let node_after = db.get_ghost_node_by_ref("v-vault", "design-philosophy.md").unwrap();
+    let node_after = db
+        .get_ghost_node_by_ref("v-vault", "design-philosophy.md")
+        .unwrap();
     assert!(
         node_after.weight > initial_weight,
         "Ghost node weight should increase with repeated access: {} > {}",
@@ -268,7 +317,14 @@ fn validation_p2_integrated_retrieval() {
         ignore_patterns: vec![],
     };
 
-    ghost::register_and_scan(&db, "v-vault", vault.path().to_str().unwrap(), "obsidian", &config).unwrap();
+    ghost::register_and_scan(
+        &db,
+        "v-vault",
+        vault.path().to_str().unwrap(),
+        "obsidian",
+        &config,
+    )
+    .unwrap();
 
     // Add memory graph impulses
     ingestion::save_and_confirm(
@@ -279,7 +335,8 @@ fn validation_p2_integrated_retrieval() {
         EngagementLevel::High,
         vec![],
         "test",
-    ).unwrap();
+    )
+    .unwrap();
 
     ingestion::save_and_confirm(
         &db,
@@ -289,25 +346,33 @@ fn validation_p2_integrated_retrieval() {
         EngagementLevel::Medium,
         vec![],
         "test",
-    ).unwrap();
+    )
+    .unwrap();
 
     // Query that matches memory graph impulses (via FTS on content)
     let engine = ActivationEngine::new(&db);
-    let result_memories = engine.retrieve(&RetrievalRequest {
-        query: "SQLite portable storage".to_string(),
-        max_results: 10,
-        max_hops: 3,
-    }).unwrap();
+    let result_memories = engine
+        .retrieve(&RetrievalRequest {
+            query: "SQLite portable storage".to_string(),
+            max_results: 10,
+            max_hops: 3,
+        })
+        .unwrap();
 
     // Should get results from memory graph
-    assert!(!result_memories.memories.is_empty(), "Should find memory graph impulses matching SQLite");
+    assert!(
+        !result_memories.memories.is_empty(),
+        "Should find memory graph impulses matching SQLite"
+    );
 
     // Query that matches ghost node titles (via FTS on ghost titles)
-    let result_ghost = engine.retrieve(&RetrievalRequest {
-        query: "architecture".to_string(),
-        max_results: 10,
-        max_hops: 3,
-    }).unwrap();
+    let result_ghost = engine
+        .retrieve(&RetrievalRequest {
+            query: "architecture".to_string(),
+            max_results: 10,
+            max_hops: 3,
+        })
+        .unwrap();
 
     // Should get ghost activations from the vault
     assert!(

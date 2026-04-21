@@ -26,11 +26,7 @@ pub fn register_and_scan(
 
 /// Refresh an existing ghost source by deleting all its ghost nodes and
 /// re-scanning the directory. Returns the new node count.
-pub fn refresh(
-    db: &Database,
-    name: &str,
-    config: &ScanConfig,
-) -> Result<usize, String> {
+pub fn refresh(db: &Database, name: &str, config: &ScanConfig) -> Result<usize, String> {
     // Look up the source by name
     let sources = db
         .list_ghost_sources()
@@ -76,12 +72,8 @@ fn scan_and_store(
 
     // Insert ghost connections by resolving from_ref/to_ref to ghost node IDs
     for link in &result.links {
-        let from_node = db
-            .get_ghost_node_by_ref(name, &link.from_ref)
-            .ok();
-        let to_node = db
-            .get_ghost_node_by_ref(name, &link.to_ref)
-            .ok();
+        let from_node = db.get_ghost_node_by_ref(name, &link.from_ref).ok();
+        let to_node = db.get_ghost_node_by_ref(name, &link.to_ref).ok();
 
         if let (Some(from), Some(to)) = (from_node, to_node) {
             let input = NewGhostConnection {

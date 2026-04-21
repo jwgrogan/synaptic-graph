@@ -1,8 +1,8 @@
 mod common;
 
-use synaptic_graph::ghost::scanner::{ScanConfig, scan_directory};
-use synaptic_graph::ghost::{register_and_scan, refresh};
 use std::fs;
+use synaptic_graph::ghost::scanner::{scan_directory, ScanConfig};
+use synaptic_graph::ghost::{refresh, register_and_scan};
 use tempfile::TempDir;
 
 fn create_test_vault() -> TempDir {
@@ -10,13 +10,29 @@ fn create_test_vault() -> TempDir {
     let root = dir.path();
 
     // Create some markdown files with links
-    fs::write(root.join("index.md"), "# Index\n\nSee [[design]] and [[architecture]].\n").unwrap();
-    fs::write(root.join("design.md"), "# Design\n\nRelates to [[architecture]].\nTagged: #philosophy #design\n").unwrap();
-    fs::write(root.join("architecture.md"), "# Architecture\n\nSQLite-based system.\n").unwrap();
+    fs::write(
+        root.join("index.md"),
+        "# Index\n\nSee [[design]] and [[architecture]].\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("design.md"),
+        "# Design\n\nRelates to [[architecture]].\nTagged: #philosophy #design\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("architecture.md"),
+        "# Architecture\n\nSQLite-based system.\n",
+    )
+    .unwrap();
 
     // Create a subdirectory
     fs::create_dir(root.join("notes")).unwrap();
-    fs::write(root.join("notes/daily.md"), "# Daily Note\n\nNothing important.\n").unwrap();
+    fs::write(
+        root.join("notes/daily.md"),
+        "# Daily Note\n\nNothing important.\n",
+    )
+    .unwrap();
 
     // Create a non-markdown file (should be ignored by default)
     fs::write(root.join("image.png"), "fake png data").unwrap();
@@ -73,7 +89,11 @@ fn test_scan_ignores_non_matching_extensions() {
     };
 
     let result = scan_directory(vault.path(), &config).unwrap();
-    let refs: Vec<&str> = result.nodes.iter().map(|n| n.external_ref.as_str()).collect();
+    let refs: Vec<&str> = result
+        .nodes
+        .iter()
+        .map(|n| n.external_ref.as_str())
+        .collect();
     assert!(!refs.iter().any(|r| r.contains("image.png")));
 }
 
@@ -235,7 +255,14 @@ fn test_register_same_source_twice() {
         ignore_patterns: vec![],
     };
 
-    register_and_scan(&db, "vault", vault.path().to_str().unwrap(), "obsidian", &config).unwrap();
+    register_and_scan(
+        &db,
+        "vault",
+        vault.path().to_str().unwrap(),
+        "obsidian",
+        &config,
+    )
+    .unwrap();
     // Re-scan the same source via refresh — should not error, should update
     refresh(&db, "vault", &config).unwrap();
 

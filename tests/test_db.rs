@@ -1,7 +1,10 @@
 mod common;
 
-use synaptic_graph::models::*;
 use serde_json::json;
+use synaptic_graph::db::Database;
+use synaptic_graph::graph::{GraphNodeKind, CURRENT_SCHEMA_VERSION};
+use synaptic_graph::models::*;
+use tempfile::TempDir;
 
 #[test]
 fn test_database_creates_tables() {
@@ -168,33 +171,35 @@ fn test_soft_delete() {
 #[test]
 fn test_fts_search() {
     let db = common::test_db();
-    let rust_impulse = db.insert_impulse(&NewImpulse {
-        content: "Rust is great for systems programming".to_string(),
-        impulse_type: ImpulseType::Preference,
-        initial_weight: 0.5,
-        emotional_valence: EmotionalValence::Positive,
-        engagement_level: EngagementLevel::Medium,
-        source_signals: vec![],
-        source_type: SourceType::ExplicitSave,
-        source_ref: "test".to_string(),
-        source_provider: "unknown".to_string(),
-        source_account: String::new(),
-    })
-    .unwrap();
+    let rust_impulse = db
+        .insert_impulse(&NewImpulse {
+            content: "Rust is great for systems programming".to_string(),
+            impulse_type: ImpulseType::Preference,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Positive,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
 
-    let python_impulse = db.insert_impulse(&NewImpulse {
-        content: "Python is slow but good for prototyping".to_string(),
-        impulse_type: ImpulseType::Preference,
-        initial_weight: 0.5,
-        emotional_valence: EmotionalValence::Neutral,
-        engagement_level: EngagementLevel::Medium,
-        source_signals: vec![],
-        source_type: SourceType::ExplicitSave,
-        source_ref: "test".to_string(),
-        source_provider: "unknown".to_string(),
-        source_account: String::new(),
-    })
-    .unwrap();
+    let python_impulse = db
+        .insert_impulse(&NewImpulse {
+            content: "Python is slow but good for prototyping".to_string(),
+            impulse_type: ImpulseType::Preference,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
 
     // Confirm both impulses so FTS search can find them
     db.confirm_impulse(&rust_impulse.id).unwrap();
@@ -211,19 +216,20 @@ fn test_fts_search() {
 fn test_fts_search_excludes_non_confirmed() {
     let db = common::test_db();
     // Insert an impulse but don't confirm it
-    let _impulse = db.insert_impulse(&NewImpulse {
-        content: "Unconfirmed candidate impulse about Rust".to_string(),
-        impulse_type: ImpulseType::Observation,
-        initial_weight: 0.5,
-        emotional_valence: EmotionalValence::Neutral,
-        engagement_level: EngagementLevel::Medium,
-        source_signals: vec![],
-        source_type: SourceType::ExplicitSave,
-        source_ref: "test".to_string(),
-        source_provider: "unknown".to_string(),
-        source_account: String::new(),
-    })
-    .unwrap();
+    let _impulse = db
+        .insert_impulse(&NewImpulse {
+            content: "Unconfirmed candidate impulse about Rust".to_string(),
+            impulse_type: ImpulseType::Observation,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
 
     // FTS search should return nothing since impulse is still a candidate
     let results = db.search_impulses_fts("Rust").unwrap();
@@ -235,24 +241,28 @@ fn test_memory_stats() {
     let db = common::test_db();
     let stats = db.memory_stats().unwrap();
     assert_eq!(stats.total_impulses, 0);
+    assert_eq!(stats.total_memory_nodes, 0);
     assert_eq!(stats.total_connections, 0);
+    assert_eq!(stats.total_graph_edges, 0);
 
-    let impulse = db.insert_impulse(&NewImpulse {
-        content: "Test".to_string(),
-        impulse_type: ImpulseType::Observation,
-        initial_weight: 0.5,
-        emotional_valence: EmotionalValence::Neutral,
-        engagement_level: EngagementLevel::Medium,
-        source_signals: vec![],
-        source_type: SourceType::ExplicitSave,
-        source_ref: "test".to_string(),
-        source_provider: "unknown".to_string(),
-        source_account: String::new(),
-    })
-    .unwrap();
+    let impulse = db
+        .insert_impulse(&NewImpulse {
+            content: "Test".to_string(),
+            impulse_type: ImpulseType::Observation,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
 
     let stats = db.memory_stats().unwrap();
     assert_eq!(stats.total_impulses, 1);
+    assert_eq!(stats.total_memory_nodes, 1);
     assert_eq!(stats.candidate_impulses, 1);
     assert_eq!(stats.confirmed_impulses, 0);
 
@@ -261,24 +271,109 @@ fn test_memory_stats() {
     let stats = db.memory_stats().unwrap();
     assert_eq!(stats.confirmed_impulses, 1);
     assert_eq!(stats.candidate_impulses, 0);
+    assert_eq!(stats.total_skill_nodes, 0);
+    assert_eq!(stats.total_ghost_nodes, 0);
+}
+
+#[test]
+fn test_schema_version_and_canonical_graph_are_initialized() {
+    let db = common::test_db();
+
+    let schema = db.schema_info().unwrap();
+    assert_eq!(schema.version, CURRENT_SCHEMA_VERSION);
+    assert!(schema
+        .feature_flags
+        .iter()
+        .any(|flag| flag == "canonical_graph"));
+
+    assert_eq!(db.canonical_node_count().unwrap(), 0);
+    assert_eq!(db.canonical_edge_count().unwrap(), 0);
+}
+
+#[test]
+fn test_canonical_graph_tracks_impulse_and_connection_changes() {
+    let db = common::test_db();
+    let a = db
+        .insert_impulse(&NewImpulse {
+            content: "A typed graph kernel needs one canonical node model".to_string(),
+            impulse_type: ImpulseType::Heuristic,
+            initial_weight: 0.7,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::High,
+            source_signals: vec!["design review".to_string()],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "schema-test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
+    db.confirm_impulse(&a.id).unwrap();
+
+    let b = db
+        .insert_impulse(&NewImpulse {
+            content: "Migration first, reflection later".to_string(),
+            impulse_type: ImpulseType::Pattern,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec!["planning".to_string()],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "schema-test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
+
+    let conn = db
+        .insert_connection(&NewConnection {
+            source_id: a.id.clone(),
+            target_id: b.id.clone(),
+            weight: 0.8,
+            relationship: "supports".to_string(),
+        })
+        .unwrap();
+
+    let canonical_a = db.get_canonical_node(&a.id).unwrap();
+    assert_eq!(canonical_a.kind, GraphNodeKind::Memory);
+    assert_eq!(canonical_a.status, "confirmed");
+
+    let payload_a = db.get_canonical_memory_payload(&a.id).unwrap();
+    assert_eq!(
+        payload_a.content,
+        "A typed graph kernel needs one canonical node model"
+    );
+    assert_eq!(payload_a.source_signals, vec!["design review".to_string()]);
+
+    let canonical_conn = db.get_canonical_edge(&conn.id).unwrap();
+    assert_eq!(canonical_conn.relationship, "supports");
+    assert_eq!(canonical_conn.weight, 0.8);
+
+    db.update_impulse_weight(&a.id, 0.9).unwrap();
+    db.touch_connection(&conn.id).unwrap();
+
+    let canonical_a = db.get_canonical_node(&a.id).unwrap();
+    assert_eq!(canonical_a.weight, 0.9);
+    let canonical_conn = db.get_canonical_edge(&conn.id).unwrap();
+    assert_eq!(canonical_conn.traversal_count, 1);
 }
 
 #[test]
 fn test_list_candidates() {
     let db = common::test_db();
-    let impulse = db.insert_impulse(&NewImpulse {
-        content: "A candidate".to_string(),
-        impulse_type: ImpulseType::Observation,
-        initial_weight: 0.5,
-        emotional_valence: EmotionalValence::Neutral,
-        engagement_level: EngagementLevel::Medium,
-        source_signals: vec![],
-        source_type: SourceType::ExplicitSave,
-        source_ref: "test".to_string(),
-        source_provider: "unknown".to_string(),
-        source_account: String::new(),
-    })
-    .unwrap();
+    let impulse = db
+        .insert_impulse(&NewImpulse {
+            content: "A candidate".to_string(),
+            impulse_type: ImpulseType::Observation,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
 
     let candidates = db.list_candidates().unwrap();
     assert_eq!(candidates.len(), 1);
@@ -293,19 +388,20 @@ fn test_list_candidates() {
 #[test]
 fn test_dismiss_impulse() {
     let db = common::test_db();
-    let impulse = db.insert_impulse(&NewImpulse {
-        content: "To be dismissed".to_string(),
-        impulse_type: ImpulseType::Observation,
-        initial_weight: 0.5,
-        emotional_valence: EmotionalValence::Neutral,
-        engagement_level: EngagementLevel::Medium,
-        source_signals: vec![],
-        source_type: SourceType::ExplicitSave,
-        source_ref: "test".to_string(),
-        source_provider: "unknown".to_string(),
-        source_account: String::new(),
-    })
-    .unwrap();
+    let impulse = db
+        .insert_impulse(&NewImpulse {
+            content: "To be dismissed".to_string(),
+            impulse_type: ImpulseType::Observation,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
 
     db.dismiss_impulse(&impulse.id).unwrap();
     let dismissed = db.get_impulse(&impulse.id).unwrap();
@@ -315,19 +411,20 @@ fn test_dismiss_impulse() {
 #[test]
 fn test_touch_impulse() {
     let db = common::test_db();
-    let impulse = db.insert_impulse(&NewImpulse {
-        content: "Touch test".to_string(),
-        impulse_type: ImpulseType::Observation,
-        initial_weight: 0.5,
-        emotional_valence: EmotionalValence::Neutral,
-        engagement_level: EngagementLevel::Medium,
-        source_signals: vec![],
-        source_type: SourceType::ExplicitSave,
-        source_ref: "test".to_string(),
-        source_provider: "unknown".to_string(),
-        source_account: String::new(),
-    })
-    .unwrap();
+    let impulse = db
+        .insert_impulse(&NewImpulse {
+            content: "Touch test".to_string(),
+            impulse_type: ImpulseType::Observation,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
 
     let original_accessed = impulse.last_accessed_at;
     // Small delay to ensure timestamp changes
@@ -340,38 +437,44 @@ fn test_touch_impulse() {
 #[test]
 fn test_touch_connection() {
     let db = common::test_db();
-    let a = db.insert_impulse(&NewImpulse {
-        content: "A".to_string(),
-        impulse_type: ImpulseType::Observation,
-        initial_weight: 0.5,
-        emotional_valence: EmotionalValence::Neutral,
-        engagement_level: EngagementLevel::Medium,
-        source_signals: vec![],
-        source_type: SourceType::ExplicitSave,
-        source_ref: "test".to_string(),
-        source_provider: "unknown".to_string(),
-        source_account: String::new(),
-    }).unwrap();
+    let a = db
+        .insert_impulse(&NewImpulse {
+            content: "A".to_string(),
+            impulse_type: ImpulseType::Observation,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
 
-    let b = db.insert_impulse(&NewImpulse {
-        content: "B".to_string(),
-        impulse_type: ImpulseType::Observation,
-        initial_weight: 0.5,
-        emotional_valence: EmotionalValence::Neutral,
-        engagement_level: EngagementLevel::Medium,
-        source_signals: vec![],
-        source_type: SourceType::ExplicitSave,
-        source_ref: "test".to_string(),
-        source_provider: "unknown".to_string(),
-        source_account: String::new(),
-    }).unwrap();
+    let b = db
+        .insert_impulse(&NewImpulse {
+            content: "B".to_string(),
+            impulse_type: ImpulseType::Observation,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
 
-    let conn = db.insert_connection(&NewConnection {
-        source_id: a.id.clone(),
-        target_id: b.id.clone(),
-        weight: 0.5,
-        relationship: "relates_to".to_string(),
-    }).unwrap();
+    let conn = db
+        .insert_connection(&NewConnection {
+            source_id: a.id.clone(),
+            target_id: b.id.clone(),
+            weight: 0.5,
+            relationship: "relates_to".to_string(),
+        })
+        .unwrap();
 
     assert_eq!(conn.traversal_count, 0);
     db.touch_connection(&conn.id).unwrap();
@@ -404,7 +507,9 @@ fn test_insert_and_get_ghost_node() {
     assert_eq!(fetched.title, "Rust Design Patterns");
 
     // Retrieve by ref
-    let by_ref = db.get_ghost_node_by_ref("obsidian-vault", "notes/rust-patterns.md").unwrap();
+    let by_ref = db
+        .get_ghost_node_by_ref("obsidian-vault", "notes/rust-patterns.md")
+        .unwrap();
     assert_eq!(by_ref.id, node.id);
 
     // Touch and verify last_accessed_at updates
@@ -430,7 +535,8 @@ fn test_list_ghost_nodes_by_source() {
         title: "Note One".to_string(),
         metadata: json!({}),
         initial_weight: 0.3,
-    }).unwrap();
+    })
+    .unwrap();
 
     db.insert_ghost_node(&NewGhostNode {
         source_graph: "vault-a".to_string(),
@@ -438,7 +544,8 @@ fn test_list_ghost_nodes_by_source() {
         title: "Note Two".to_string(),
         metadata: json!({}),
         initial_weight: 0.5,
-    }).unwrap();
+    })
+    .unwrap();
 
     db.insert_ghost_node(&NewGhostNode {
         source_graph: "vault-b".to_string(),
@@ -446,7 +553,8 @@ fn test_list_ghost_nodes_by_source() {
         title: "Other Note".to_string(),
         metadata: json!({}),
         initial_weight: 0.4,
-    }).unwrap();
+    })
+    .unwrap();
 
     let vault_a_nodes = db.list_ghost_nodes_by_source("vault-a").unwrap();
     assert_eq!(vault_a_nodes.len(), 2);
@@ -471,28 +579,34 @@ fn test_list_ghost_nodes_by_source() {
 fn test_ghost_node_connections() {
     let db = common::test_db();
 
-    let node_a = db.insert_ghost_node(&NewGhostNode {
-        source_graph: "vault".to_string(),
-        external_ref: "a.md".to_string(),
-        title: "Ghost A".to_string(),
-        metadata: json!({}),
-        initial_weight: 0.5,
-    }).unwrap();
+    let node_a = db
+        .insert_ghost_node(&NewGhostNode {
+            source_graph: "vault".to_string(),
+            external_ref: "a.md".to_string(),
+            title: "Ghost A".to_string(),
+            metadata: json!({}),
+            initial_weight: 0.5,
+        })
+        .unwrap();
 
-    let node_b = db.insert_ghost_node(&NewGhostNode {
-        source_graph: "vault".to_string(),
-        external_ref: "b.md".to_string(),
-        title: "Ghost B".to_string(),
-        metadata: json!({}),
-        initial_weight: 0.5,
-    }).unwrap();
+    let node_b = db
+        .insert_ghost_node(&NewGhostNode {
+            source_graph: "vault".to_string(),
+            external_ref: "b.md".to_string(),
+            title: "Ghost B".to_string(),
+            metadata: json!({}),
+            initial_weight: 0.5,
+        })
+        .unwrap();
 
-    let conn = db.insert_ghost_connection(&NewGhostConnection {
-        source_id: node_a.id.clone(),
-        target_id: node_b.id.clone(),
-        weight: 0.7,
-        relationship: "links_to".to_string(),
-    }).unwrap();
+    let conn = db
+        .insert_ghost_connection(&NewGhostConnection {
+            source_id: node_a.id.clone(),
+            target_id: node_b.id.clone(),
+            weight: 0.7,
+            relationship: "links_to".to_string(),
+        })
+        .unwrap();
 
     assert_eq!(conn.source_id, node_a.id);
     assert_eq!(conn.target_id, node_b.id);
@@ -515,7 +629,9 @@ fn test_ghost_source_registry() {
     let db = common::test_db();
 
     // Register a source
-    let source = db.register_ghost_source("my-vault", "/home/user/vault", "obsidian").unwrap();
+    let source = db
+        .register_ghost_source("my-vault", "/home/user/vault", "obsidian")
+        .unwrap();
     assert_eq!(source.name, "my-vault");
     assert_eq!(source.root_path, "/home/user/vault");
     assert_eq!(source.source_type, "obsidian");
@@ -534,7 +650,8 @@ fn test_ghost_source_registry() {
         title: "Test Note".to_string(),
         metadata: json!({}),
         initial_weight: 0.3,
-    }).unwrap();
+    })
+    .unwrap();
 
     let sources = db.list_ghost_sources().unwrap();
     assert_eq!(sources[0].node_count, 1);
@@ -558,17 +675,21 @@ fn test_create_and_list_tags() {
     let db = common::test_db();
 
     // Create tags
-    let tag1 = db.create_tag(&NewTag {
-        name: "rust".to_string(),
-        color: "#FF5733".to_string(),
-    }).unwrap();
+    let tag1 = db
+        .create_tag(&NewTag {
+            name: "rust".to_string(),
+            color: "#FF5733".to_string(),
+        })
+        .unwrap();
     assert_eq!(tag1.name, "rust");
     assert_eq!(tag1.color, "#FF5733");
 
-    let tag2 = db.create_tag(&NewTag {
-        name: "architecture".to_string(),
-        color: "#3498DB".to_string(),
-    }).unwrap();
+    let tag2 = db
+        .create_tag(&NewTag {
+            name: "architecture".to_string(),
+            color: "#3498DB".to_string(),
+        })
+        .unwrap();
     assert_eq!(tag2.name, "architecture");
 
     // List tags (sorted by name)
@@ -595,24 +716,27 @@ fn test_tag_and_untag_impulse() {
     let db = common::test_db();
 
     // Create an impulse
-    let impulse = db.insert_impulse(&NewImpulse {
-        content: "Rust ownership model".to_string(),
-        impulse_type: ImpulseType::Heuristic,
-        initial_weight: 0.7,
-        emotional_valence: EmotionalValence::Positive,
-        engagement_level: EngagementLevel::High,
-        source_signals: vec![],
-        source_type: SourceType::ExplicitSave,
-        source_ref: "test".to_string(),
-        source_provider: "unknown".to_string(),
-        source_account: String::new(),
-    }).unwrap();
+    let impulse = db
+        .insert_impulse(&NewImpulse {
+            content: "Rust ownership model".to_string(),
+            impulse_type: ImpulseType::Heuristic,
+            initial_weight: 0.7,
+            emotional_valence: EmotionalValence::Positive,
+            engagement_level: EngagementLevel::High,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
 
     // Create a tag
     db.create_tag(&NewTag {
         name: "rust".to_string(),
         color: "#FF5733".to_string(),
-    }).unwrap();
+    })
+    .unwrap();
 
     // Tag the impulse
     db.tag_impulse(&impulse.id, "rust").unwrap();
@@ -639,22 +763,36 @@ fn test_get_tags_for_impulse() {
 
     let db = common::test_db();
 
-    let impulse = db.insert_impulse(&NewImpulse {
-        content: "Multi-tag test".to_string(),
-        impulse_type: ImpulseType::Observation,
-        initial_weight: 0.5,
-        emotional_valence: EmotionalValence::Neutral,
-        engagement_level: EngagementLevel::Medium,
-        source_signals: vec![],
-        source_type: SourceType::ExplicitSave,
-        source_ref: "test".to_string(),
-        source_provider: "unknown".to_string(),
-        source_account: String::new(),
-    }).unwrap();
+    let impulse = db
+        .insert_impulse(&NewImpulse {
+            content: "Multi-tag test".to_string(),
+            impulse_type: ImpulseType::Observation,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
 
-    db.create_tag(&NewTag { name: "alpha".to_string(), color: "#AAA".to_string() }).unwrap();
-    db.create_tag(&NewTag { name: "beta".to_string(), color: "#BBB".to_string() }).unwrap();
-    db.create_tag(&NewTag { name: "gamma".to_string(), color: "#CCC".to_string() }).unwrap();
+    db.create_tag(&NewTag {
+        name: "alpha".to_string(),
+        color: "#AAA".to_string(),
+    })
+    .unwrap();
+    db.create_tag(&NewTag {
+        name: "beta".to_string(),
+        color: "#BBB".to_string(),
+    })
+    .unwrap();
+    db.create_tag(&NewTag {
+        name: "gamma".to_string(),
+        color: "#CCC".to_string(),
+    })
+    .unwrap();
 
     db.tag_impulse(&impulse.id, "alpha").unwrap();
     db.tag_impulse(&impulse.id, "beta").unwrap();
@@ -678,38 +816,133 @@ fn test_get_tags_for_impulse() {
 fn test_source_provider_stored() {
     let db = common::test_db();
 
-    let impulse = db.insert_impulse(&NewImpulse {
-        content: "Provider test".to_string(),
-        impulse_type: ImpulseType::Observation,
-        initial_weight: 0.5,
-        emotional_valence: EmotionalValence::Neutral,
-        engagement_level: EngagementLevel::Medium,
-        source_signals: vec![],
-        source_type: SourceType::ExplicitSave,
-        source_ref: "test".to_string(),
-        source_provider: "claude".to_string(),
-        source_account: "user@example.com".to_string(),
-    }).unwrap();
+    let impulse = db
+        .insert_impulse(&NewImpulse {
+            content: "Provider test".to_string(),
+            impulse_type: ImpulseType::Observation,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "claude".to_string(),
+            source_account: "user@example.com".to_string(),
+        })
+        .unwrap();
 
     let fetched = db.get_impulse(&impulse.id).unwrap();
     assert_eq!(fetched.source_provider, "claude");
     assert_eq!(fetched.source_account, "user@example.com");
 
     // Default values should be 'unknown' and ''
-    let default_impulse = db.insert_impulse(&NewImpulse {
-        content: "Default provider test".to_string(),
-        impulse_type: ImpulseType::Observation,
-        initial_weight: 0.5,
-        emotional_valence: EmotionalValence::Neutral,
-        engagement_level: EngagementLevel::Medium,
-        source_signals: vec![],
-        source_type: SourceType::ExplicitSave,
-        source_ref: "test".to_string(),
-        source_provider: "unknown".to_string(),
-        source_account: String::new(),
-    }).unwrap();
+    let default_impulse = db
+        .insert_impulse(&NewImpulse {
+            content: "Default provider test".to_string(),
+            impulse_type: ImpulseType::Observation,
+            initial_weight: 0.5,
+            emotional_valence: EmotionalValence::Neutral,
+            engagement_level: EngagementLevel::Medium,
+            source_signals: vec![],
+            source_type: SourceType::ExplicitSave,
+            source_ref: "test".to_string(),
+            source_provider: "unknown".to_string(),
+            source_account: String::new(),
+        })
+        .unwrap();
 
     let fetched_default = db.get_impulse(&default_impulse.id).unwrap();
     assert_eq!(fetched_default.source_provider, "unknown");
     assert_eq!(fetched_default.source_account, "");
+}
+
+#[test]
+fn test_reopen_preserves_canonical_feedback_and_skill_state() {
+    let dir = TempDir::new().unwrap();
+    let db_path = dir.path().join("memory.db");
+    let db_path = db_path.to_str().unwrap().to_string();
+
+    let memory_id;
+    let skill_id;
+
+    {
+        let db = Database::open(&db_path).unwrap();
+
+        let impulse = db
+            .insert_impulse(&NewImpulse {
+                content: "Canonical restart safety".to_string(),
+                impulse_type: ImpulseType::Heuristic,
+                initial_weight: 0.7,
+                emotional_valence: EmotionalValence::Neutral,
+                engagement_level: EngagementLevel::Medium,
+                source_signals: vec![],
+                source_type: SourceType::ExplicitSave,
+                source_ref: "test".to_string(),
+                source_provider: "unknown".to_string(),
+                source_account: String::new(),
+            })
+            .unwrap();
+        db.confirm_impulse(&impulse.id).unwrap();
+        db.apply_feedback_to_node(&impulse.id, FeedbackKind::Helpful)
+            .unwrap();
+
+        let evidence = db
+            .create_evidence_set(
+                "restart safety",
+                "stable-hash",
+                std::slice::from_ref(&impulse.id),
+                &[],
+                Some(24),
+            )
+            .unwrap();
+
+        let skill = db
+            .create_skill(
+                "Restart-safe skill",
+                "A skill that should survive restarts without backfill reset",
+                "When checking canonical restart behavior",
+                &["Verify reopen behavior".to_string()],
+                &[],
+                &evidence.id,
+                std::slice::from_ref(&impulse.id),
+                "unknown",
+                "",
+            )
+            .unwrap();
+
+        let canonical = db.get_canonical_node(&impulse.id).unwrap();
+        assert_eq!(canonical.helpful_count, 1);
+
+        memory_id = impulse.id;
+        skill_id = skill.node_id;
+    }
+
+    let reopened = Database::open(&db_path).unwrap();
+    let canonical = reopened.get_canonical_node(&memory_id).unwrap();
+    assert_eq!(canonical.helpful_count, 1);
+    assert_eq!(canonical.unhelpful_count, 0);
+
+    let skill = reopened.get_skill(&skill_id).unwrap();
+    assert_eq!(skill.name, "Restart-safe skill");
+    assert_eq!(
+        reopened.get_skill_evidence_node_ids(&skill_id).unwrap(),
+        vec![memory_id]
+    );
+}
+
+#[test]
+fn test_purge_expired_evidence_sets_removes_only_stale_rows() {
+    let db = common::test_db();
+
+    let fresh = db
+        .create_evidence_set("fresh", "fresh-hash", &[], &[], Some(24))
+        .unwrap();
+    let expired = db
+        .create_evidence_set("expired", "old-hash", &[], &[], Some(-1))
+        .unwrap();
+
+    let purged = db.purge_expired_evidence_sets().unwrap();
+    assert_eq!(purged, 1);
+    assert!(db.get_evidence_set(&expired.id).is_err());
+    assert!(db.get_evidence_set(&fresh.id).is_ok());
 }

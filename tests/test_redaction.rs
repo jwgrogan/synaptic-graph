@@ -13,7 +13,9 @@ fn test_redacts_aws_access_key() {
 fn test_redacts_generic_api_key_pattern() {
     let input = "api_key = sk-1234567890abcdef1234567890abcdef";
     let result = redaction::redact(input);
-    assert!(!result.clean_content.contains("sk-1234567890abcdef1234567890abcdef"));
+    assert!(!result
+        .clean_content
+        .contains("sk-1234567890abcdef1234567890abcdef"));
     assert!(!result.redactions.is_empty());
 }
 

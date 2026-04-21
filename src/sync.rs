@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -25,12 +25,18 @@ pub struct DeviceEntry {
     pub checksum: String,
     pub exported_at: DateTime<Utc>,
     pub impulse_count: i64,
+    #[serde(default)]
+    pub schema_version: i64,
+    #[serde(default)]
+    pub feature_flags: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ExportResult {
     pub snapshot_path: String,
     pub checksum: String,
+    pub schema_version: i64,
+    pub feature_flags: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,8 +63,7 @@ pub fn export_snapshot(
     device_id: &str,
 ) -> Result<ExportResult, String> {
     // Ensure sync dir exists
-    fs::create_dir_all(sync_dir)
-        .map_err(|e| format!("Failed to create sync directory: {}", e))?;
+    fs::create_dir_all(sync_dir).map_err(|e| format!("Failed to create sync directory: {}", e))?;
 
     let snapshot_filename = format!("memory-graph-{}.db", device_id);
     let snapshot_path = Path::new(sync_dir)
@@ -75,12 +80,21 @@ pub fn export_snapshot(
         last_updated: Utc::now(),
     });
 
+    let schema_info = db
+        .schema_info()
+        .map_err(|e| format!("Failed to read schema info: {}", e))?;
+
+    let schema_version = schema_info.version;
+    let feature_flags = schema_info.feature_flags;
+
     let entry = DeviceEntry {
         device_id: device_id.to_string(),
         snapshot_filename: snapshot_filename.clone(),
         checksum: backup_result.checksum.clone(),
         exported_at: Utc::now(),
         impulse_count: backup_result.impulse_count,
+        schema_version,
+        feature_flags: feature_flags.clone(),
     };
 
     manifest.devices.insert(device_id.to_string(), entry);
@@ -91,14 +105,13 @@ pub fn export_snapshot(
     Ok(ExportResult {
         snapshot_path,
         checksum: backup_result.checksum,
+        schema_version,
+        feature_flags,
     })
 }
 
 /// Check the sync directory for remote device updates.
-pub fn check_sync_status(
-    sync_dir: &str,
-    local_device_id: &str,
-) -> Result<SyncStatus, String> {
+pub fn check_sync_status(sync_dir: &str, local_device_id: &str) -> Result<SyncStatus, String> {
     let manifest = read_manifest(sync_dir)?;
 
     let remote_devices: Vec<String> = manifest
@@ -130,10 +143,7 @@ pub fn check_sync_status(
     }
 
     // Determine if remote updates exist: any remote device exported after the local device
-    let local_exported_at = manifest
-        .devices
-        .get(local_device_id)
-        .map(|e| e.exported_at);
+    let local_exported_at = manifest.devices.get(local_device_id).map(|e| e.exported_at);
 
     let has_remote_updates = match (local_exported_at, latest_time) {
         (Some(local_t), Some(remote_t)) => remote_t > local_t,
@@ -163,6 +173,8 @@ pub fn import_snapshot(
         return Err("Snapshot integrity check failed: checksum mismatch".to_string());
     }
 
+    Database::require_compatible_external_schema(snapshot_path)?;
+
     // Open both databases
     let remote_db = Database::open(snapshot_path)
         .map_err(|e| format!("Failed to open remote snapshot: {}", e))?;
@@ -177,6 +189,7 @@ pub fn import_snapshot(
     let mut inserted: usize = 0;
     let mut updated: usize = 0;
     let mut skipped: usize = 0;
+    let mut remote_memory_authoritative = HashSet::new();
 
     for remote_impulse in &remote_impulses {
         match local_db.get_impulse(&remote_impulse.id) {
@@ -191,6 +204,7 @@ pub fn import_snapshot(
                         .update_impulse_weight(&remote_impulse.id, remote_impulse.weight)
                         .map_err(|e| format!("Failed to update impulse weight: {}", e))?;
                     updated += 1;
+                    remote_memory_authoritative.insert(remote_impulse.id.clone());
                 } else {
                     skipped += 1;
                 }
@@ -213,8 +227,111 @@ pub fn import_snapshot(
                     .insert_impulse_with_id(&remote_impulse.id, &new_input)
                     .map_err(|e| format!("Failed to insert impulse with id: {}", e))?;
                 inserted += 1;
+                remote_memory_authoritative.insert(remote_impulse.id.clone());
             }
         }
+    }
+
+    let remote_nodes = remote_db
+        .list_canonical_nodes(None)
+        .map_err(|e| format!("Failed to list remote canonical nodes: {}", e))?;
+    for remote_node in &remote_nodes {
+        let force_memory_sync = remote_node.kind == crate::graph::GraphNodeKind::Memory
+            && remote_memory_authoritative.contains(&remote_node.id);
+
+        let (inserted_node, updated_node) = local_db
+            .upsert_canonical_node_from_sync(remote_node)
+            .map_err(|e| {
+            format!("Failed to upsert canonical node {}: {}", remote_node.id, e)
+        })?;
+        if force_memory_sync {
+            local_db
+                .force_upsert_canonical_node(remote_node)
+                .map_err(|e| {
+                    format!(
+                        "Failed to force-sync canonical memory node {}: {}",
+                        remote_node.id, e
+                    )
+                })?;
+        }
+        let should_refresh_payload = inserted_node || updated_node || force_memory_sync;
+
+        match remote_node.kind {
+            crate::graph::GraphNodeKind::Memory if should_refresh_payload => {
+                let payload = remote_db
+                    .get_canonical_memory_payload(&remote_node.id)
+                    .map_err(|e| {
+                        format!(
+                            "Failed to load remote memory payload for {}: {}",
+                            remote_node.id, e
+                        )
+                    })?;
+                local_db
+                    .upsert_canonical_memory_payload(&payload)
+                    .map_err(|e| {
+                        format!(
+                            "Failed to upsert memory payload for {}: {}",
+                            remote_node.id, e
+                        )
+                    })?;
+            }
+            crate::graph::GraphNodeKind::Skill if should_refresh_payload => {
+                let payload = remote_db.get_skill(&remote_node.id).map_err(|e| {
+                    format!(
+                        "Failed to load remote skill payload for {}: {}",
+                        remote_node.id, e
+                    )
+                })?;
+                local_db.upsert_skill_payload(&payload).map_err(|e| {
+                    format!(
+                        "Failed to upsert skill payload for {}: {}",
+                        remote_node.id, e
+                    )
+                })?;
+            }
+            crate::graph::GraphNodeKind::Ghost if should_refresh_payload => {
+                let payload = remote_db
+                    .get_canonical_ghost_payload(&remote_node.id)
+                    .map_err(|e| {
+                        format!(
+                            "Failed to load remote ghost payload for {}: {}",
+                            remote_node.id, e
+                        )
+                    })?;
+                local_db
+                    .upsert_canonical_ghost_payload(&payload)
+                    .map_err(|e| {
+                        format!(
+                            "Failed to upsert ghost payload for {}: {}",
+                            remote_node.id, e
+                        )
+                    })?;
+            }
+            _ => {}
+        }
+    }
+
+    let remote_edges = remote_db
+        .list_canonical_edges()
+        .map_err(|e| format!("Failed to list remote canonical edges: {}", e))?;
+    for remote_edge in &remote_edges {
+        let _ = local_db
+            .upsert_canonical_edge_from_sync(remote_edge)
+            .map_err(|e| format!("Failed to upsert canonical edge {}: {}", remote_edge.id, e))?;
+    }
+
+    let remote_assessments = remote_db
+        .list_assessments(None, None, None)
+        .map_err(|e| format!("Failed to list remote assessments: {}", e))?;
+    for remote_assessment in &remote_assessments {
+        let _ = local_db
+            .upsert_assessment_from_sync(remote_assessment)
+            .map_err(|e| {
+                format!(
+                    "Failed to upsert assessment {}: {}",
+                    remote_assessment.id, e
+                )
+            })?;
     }
 
     Ok(SyncMergeResult {
@@ -240,7 +357,6 @@ fn write_manifest(sync_dir: &str, manifest: &SyncManifest) -> Result<(), String>
     let manifest_path = Path::new(sync_dir).join("manifest.json");
     let data = serde_json::to_string_pretty(manifest)
         .map_err(|e| format!("Failed to serialize manifest: {}", e))?;
-    fs::write(&manifest_path, data)
-        .map_err(|e| format!("Failed to write manifest: {}", e))?;
+    fs::write(&manifest_path, data).map_err(|e| format!("Failed to write manifest: {}", e))?;
     Ok(())
 }

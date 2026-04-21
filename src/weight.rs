@@ -33,7 +33,10 @@ pub fn decay_rate_for_type(impulse_type: ImpulseType) -> f64 {
 }
 
 /// Calculate hours elapsed between two timestamps.
-pub fn hours_since(from: &chrono::DateTime<chrono::Utc>, to: &chrono::DateTime<chrono::Utc>) -> f64 {
+pub fn hours_since(
+    from: &chrono::DateTime<chrono::Utc>,
+    to: &chrono::DateTime<chrono::Utc>,
+) -> f64 {
     let duration = *to - *from;
     duration.num_seconds() as f64 / 3600.0
 }

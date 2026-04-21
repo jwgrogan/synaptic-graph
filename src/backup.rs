@@ -19,16 +19,20 @@ pub struct BackupResult {
 /// Returns a BackupResult with path, checksum, and stats.
 pub fn create_backup(db: &Database, backup_path: &str) -> Result<BackupResult, String> {
     // Get stats before backup
-    let impulse_count = db.impulse_count().map_err(|e| format!("Failed to count impulses: {}", e))?;
-    let connection_count = db.connection_count().map_err(|e| format!("Failed to count connections: {}", e))?;
+    let impulse_count = db
+        .impulse_count()
+        .map_err(|e| format!("Failed to count impulses: {}", e))?;
+    let connection_count = db
+        .connection_count()
+        .map_err(|e| format!("Failed to count connections: {}", e))?;
 
     // Create consistent snapshot via VACUUM INTO
     db.vacuum_into(backup_path)
         .map_err(|e| format!("VACUUM INTO failed: {}", e))?;
 
     // Compute checksum
-    let checksum = file_checksum(backup_path)
-        .map_err(|e| format!("Failed to compute checksum: {}", e))?;
+    let checksum =
+        checksum_file(backup_path).map_err(|e| format!("Failed to compute checksum: {}", e))?;
 
     // Get file size
     let metadata = fs::metadata(backup_path)
@@ -45,8 +49,8 @@ pub fn create_backup(db: &Database, backup_path: &str) -> Result<BackupResult, S
 
 /// Verify a backup file's integrity by comparing its SHA-256 checksum.
 pub fn verify_backup(backup_path: &str, expected_checksum: &str) -> Result<bool, String> {
-    let actual = file_checksum(backup_path)
-        .map_err(|e| format!("Failed to compute checksum: {}", e))?;
+    let actual =
+        checksum_file(backup_path).map_err(|e| format!("Failed to compute checksum: {}", e))?;
     Ok(actual == expected_checksum)
 }
 
@@ -74,7 +78,7 @@ pub fn restore_backup(
 }
 
 /// Compute SHA-256 checksum of a file, returned as a lowercase hex string.
-fn file_checksum(path: &str) -> Result<String, io::Error> {
+pub fn checksum_file(path: &str) -> Result<String, io::Error> {
     let mut file = fs::File::open(path)?;
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 8192];

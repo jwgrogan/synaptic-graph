@@ -18,11 +18,26 @@ mod test_validation {
         let db = common::test_db();
 
         let topics = [
-            ("Rust borrow checker prevents data races at compile time", ImpulseType::Heuristic),
-            ("PostgreSQL JSONB columns support GIN indexes for fast lookups", ImpulseType::Pattern),
-            ("Docker containers should use non-root users for security", ImpulseType::Decision),
-            ("Kubernetes liveness probes prevent cascading failures", ImpulseType::Observation),
-            ("GraphQL schema stitching merges multiple APIs into one", ImpulseType::Preference),
+            (
+                "Rust borrow checker prevents data races at compile time",
+                ImpulseType::Heuristic,
+            ),
+            (
+                "PostgreSQL JSONB columns support GIN indexes for fast lookups",
+                ImpulseType::Pattern,
+            ),
+            (
+                "Docker containers should use non-root users for security",
+                ImpulseType::Decision,
+            ),
+            (
+                "Kubernetes liveness probes prevent cascading failures",
+                ImpulseType::Observation,
+            ),
+            (
+                "GraphQL schema stitching merges multiple APIs into one",
+                ImpulseType::Preference,
+            ),
         ];
 
         for (content, itype) in &topics {
@@ -62,7 +77,10 @@ mod test_validation {
                 query
             );
             assert!(
-                result.memories[0].impulse.content.contains(expected_fragment),
+                result.memories[0]
+                    .impulse
+                    .content
+                    .contains(expected_fragment),
                 "First result for '{}' should contain '{}', got: '{}'",
                 query,
                 expected_fragment,
@@ -129,13 +147,19 @@ mod test_validation {
             result.memories.len()
         );
 
-        let contents: Vec<&str> = result.memories.iter().map(|m| m.impulse.content.as_str()).collect();
+        let contents: Vec<&str> = result
+            .memories
+            .iter()
+            .map(|m| m.impulse.content.as_str())
+            .collect();
         assert!(
             contents.iter().any(|c| c.contains("JWT token")),
             "Should find auth impulse"
         );
         assert!(
-            contents.iter().any(|c| c.contains("Security best practices")),
+            contents
+                .iter()
+                .any(|c| c.contains("Security best practices")),
             "Should find security impulse via adjacency"
         );
         assert!(
@@ -186,8 +210,10 @@ mod test_validation {
 
         // After extreme time, should hit floor but not go below
         let extreme_hours = 1_000_000.0;
-        let semantic_extreme = weight::effective_weight(initial_weight, extreme_hours, DECAY_SEMANTIC);
-        let episodic_extreme = weight::effective_weight(initial_weight, extreme_hours, DECAY_EPISODIC);
+        let semantic_extreme =
+            weight::effective_weight(initial_weight, extreme_hours, DECAY_SEMANTIC);
+        let episodic_extreme =
+            weight::effective_weight(initial_weight, extreme_hours, DECAY_EPISODIC);
 
         assert!(
             (semantic_extreme - WEIGHT_FLOOR).abs() < f64::EPSILON
@@ -324,7 +350,11 @@ mod test_validation {
             result.memories.len()
         );
 
-        let contents: Vec<&str> = result.memories.iter().map(|m| m.impulse.content.as_str()).collect();
+        let contents: Vec<&str> = result
+            .memories
+            .iter()
+            .map(|m| m.impulse.content.as_str())
+            .collect();
         assert!(
             contents.iter().any(|c| c.contains("core problem")),
             "Should find the problem statement"
@@ -450,12 +480,16 @@ mod test_validation {
         );
         // Bearer token should be redacted
         assert!(
-            !impulse.content.contains("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9abcdef"),
+            !impulse
+                .content
+                .contains("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9abcdef"),
             "Bearer token should be redacted from persisted content"
         );
         // Connection string should be redacted
         assert!(
-            !impulse.content.contains("postgresql://admin:secret@prod-db:5432/myapp"),
+            !impulse
+                .content
+                .contains("postgresql://admin:secret@prod-db:5432/myapp"),
             "Connection string should be redacted from persisted content"
         );
 
@@ -494,7 +528,10 @@ mod test_validation {
             None,
             None,
         );
-        assert!(before_result.is_ok(), "Save before incognito should succeed");
+        assert!(
+            before_result.is_ok(),
+            "Save before incognito should succeed"
+        );
 
         // Get count before incognito
         let status_before = server.handle_memory_status().expect("status should work");
@@ -521,9 +558,7 @@ mod test_validation {
             "Save in incognito mode should fail"
         );
         assert!(
-            incognito_result
-                .unwrap_err()
-                .contains("incognito"),
+            incognito_result.unwrap_err().contains("incognito"),
             "Error should mention incognito"
         );
 
@@ -566,7 +601,10 @@ mod test_validation {
 
         // Update to v2 (supersede v1)
         let v2_id = db
-            .update_impulse_content(&v1.id, "v2: Use GraphQL for external APIs, REST for internal")
+            .update_impulse_content(
+                &v1.id,
+                "v2: Use GraphQL for external APIs, REST for internal",
+            )
             .expect("update should succeed");
 
         // v1 should now be superseded
@@ -593,9 +631,9 @@ mod test_validation {
         let connections = db
             .get_connections_for_node(&v2_id)
             .expect("should get connections");
-        let supersedes_conn = connections
-            .iter()
-            .find(|c| c.relationship == "supersedes" && c.source_id == v2_id && c.target_id == v1.id);
+        let supersedes_conn = connections.iter().find(|c| {
+            c.relationship == "supersedes" && c.source_id == v2_id && c.target_id == v1.id
+        });
         assert!(
             supersedes_conn.is_some(),
             "A 'supersedes' connection should exist from v2 to v1"
@@ -641,10 +679,7 @@ mod test_validation {
             max_hops: 3,
         };
         let result = engine.retrieve(&request).expect("retrieve should succeed");
-        let found_candidate = result
-            .memories
-            .iter()
-            .any(|m| m.impulse.id == candidate.id);
+        let found_candidate = result.memories.iter().any(|m| m.impulse.id == candidate.id);
         assert!(
             !found_candidate,
             "Candidate should NOT appear in FTS search results before confirmation"

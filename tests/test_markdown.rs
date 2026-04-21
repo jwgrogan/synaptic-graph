@@ -27,12 +27,7 @@ fn test_export_creates_files() {
     let files: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .map(|x| x == "md")
-                .unwrap_or(false)
-        })
+        .filter(|e| e.path().extension().map(|x| x == "md").unwrap_or(false))
         .collect();
     assert_eq!(files.len(), 1);
 }
@@ -57,12 +52,7 @@ fn test_export_includes_frontmatter() {
     let files: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .map(|x| x == "md")
-                .unwrap_or(false)
-        })
+        .filter(|e| e.path().extension().map(|x| x == "md").unwrap_or(false))
         .collect();
     let content = std::fs::read_to_string(files[0].path()).unwrap();
     assert!(content.contains("---"));
@@ -103,12 +93,7 @@ fn test_export_includes_connections_as_wikilinks() {
     let files: Vec<_> = std::fs::read_dir(dir.path())
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .map(|x| x == "md")
-                .unwrap_or(false)
-        })
+        .filter(|e| e.path().extension().map(|x| x == "md").unwrap_or(false))
         .collect();
 
     let has_wikilink = files.iter().any(|f| {
@@ -124,4 +109,56 @@ fn test_export_empty_db() {
     let dir = TempDir::new().unwrap();
     let result = markdown::export_to_markdown(&db, dir.path().to_str().unwrap()).unwrap();
     assert_eq!(result.files_written, 0);
+}
+
+#[test]
+fn test_export_ignores_skill_evidence_edges() {
+    let db = common::test_db();
+    let memory = ingestion::save_and_confirm(
+        &db,
+        "Grounding memory for skill export",
+        ImpulseType::Heuristic,
+        EmotionalValence::Neutral,
+        EngagementLevel::Medium,
+        vec![],
+        "test",
+    )
+    .unwrap();
+
+    let evidence = db
+        .create_evidence_set(
+            "skill export query",
+            "stable-export-hash",
+            std::slice::from_ref(&memory.id),
+            &[],
+            Some(24),
+        )
+        .unwrap();
+    db.create_skill(
+        "Export-side skill",
+        "Skill should not appear as a markdown memory connection",
+        "When exporting markdown",
+        &["Keep skill links out of memory notes".to_string()],
+        &[],
+        &evidence.id,
+        std::slice::from_ref(&memory.id),
+        "test",
+        "",
+    )
+    .unwrap();
+
+    let dir = TempDir::new().unwrap();
+    markdown::export_to_markdown(&db, dir.path().to_str().unwrap()).unwrap();
+
+    let files: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "md").unwrap_or(false))
+        .collect();
+    assert_eq!(files.len(), 1);
+
+    let content = std::fs::read_to_string(files[0].path()).unwrap();
+    assert!(content.contains("Grounding memory for skill export"));
+    assert!(!content.contains("evidence_for"));
+    assert!(!content.contains("Export-side skill"));
 }

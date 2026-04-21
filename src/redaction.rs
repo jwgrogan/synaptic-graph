@@ -44,7 +44,10 @@ static PATTERNS: LazyLock<Vec<SecretPattern>> = LazyLock::new(|| {
         },
         SecretPattern {
             name: "Private Key",
-            regex: Regex::new(r"(?s)-----BEGIN[A-Z ]*PRIVATE KEY-----.*?-----END[A-Z ]*PRIVATE KEY-----").unwrap(),
+            regex: Regex::new(
+                r"(?s)-----BEGIN[A-Z ]*PRIVATE KEY-----.*?-----END[A-Z ]*PRIVATE KEY-----",
+            )
+            .unwrap(),
         },
         SecretPattern {
             name: "Email Address",

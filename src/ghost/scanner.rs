@@ -32,17 +32,13 @@ pub struct ScannedLink {
     pub link_type: String,
 }
 
-static WIKILINK_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]").unwrap()
-});
+static WIKILINK_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]").unwrap());
 
-static HEADING_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^#\s+(.+)$").unwrap()
-});
+static HEADING_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#\s+(.+)$").unwrap());
 
-static TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"#([a-zA-Z][a-zA-Z0-9_-]+)").unwrap()
-});
+static TAG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"#([a-zA-Z][a-zA-Z0-9_-]+)").unwrap());
 
 pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<ScanResult, String> {
     let mut nodes = Vec::new();
@@ -74,9 +70,7 @@ pub fn scan_directory(root: &Path, config: &ScanConfig) -> Result<ScanResult, St
         // Extract title from first heading
         let title = content
             .lines()
-            .find_map(|line| {
-                HEADING_RE.captures(line).map(|c| c[1].trim().to_string())
-            })
+            .find_map(|line| HEADING_RE.captures(line).map(|c| c[1].trim().to_string()))
             .unwrap_or_else(|| {
                 path.file_stem()
                     .and_then(|s| s.to_str())
@@ -130,7 +124,11 @@ fn resolve_wikilink(target: &str, root: &Path, extensions: &[String]) -> Option<
         // Check recursively
         for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
             if entry.file_type().is_file() {
-                let name = entry.path().file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                let name = entry
+                    .path()
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("");
                 if name.eq_ignore_ascii_case(target) {
                     let rel = entry.path().strip_prefix(root).unwrap_or(entry.path());
                     return Some(rel.to_string_lossy().to_string());

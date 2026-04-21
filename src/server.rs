@@ -1,18 +1,184 @@
 // MCP tool handlers
 
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use crate::activation::ActivationEngine;
+use crate::assessments;
 use crate::backup;
 use crate::db::Database;
+use crate::evidence;
 use crate::ghost;
 use crate::ingestion;
 use crate::models::*;
+use crate::reflection;
 use crate::session::Session;
 use crate::sync;
 
 use rmcp::model::{ServerCapabilities, ServerInfo};
-use rmcp::{ServerHandler, schemars, tool};
+use rmcp::{schemars, tool, ServerHandler};
+
+fn retrieve_skill_matches(
+    db: &Database,
+    query: &str,
+    max_results: usize,
+) -> Result<Vec<RetrievedSkill>, String> {
+    let matches = db
+        .search_skills_fts(query)
+        .map_err(|e| format!("Skill FTS search failed: {}", e))?;
+
+    let mut results = Vec::new();
+    for (skill_id, rank) in matches.into_iter().take(max_results) {
+        let node = match db.get_canonical_node(&skill_id) {
+            Ok(node) => node,
+            Err(_) => continue,
+        };
+        let skill = match db.get_skill(&skill_id) {
+            Ok(skill) => skill,
+            Err(_) => continue,
+        };
+        let effective_confidence =
+            crate::confidence::effective_confidence(node.helpful_count, node.unhelpful_count);
+        let base_score = (-rank).clamp(0.1, 1.0);
+        let ranking_score =
+            base_score * crate::confidence::ranking_multiplier(effective_confidence);
+        let evidence_node_ids = db
+            .get_skill_evidence_node_ids(&skill_id)
+            .unwrap_or_default();
+
+        results.push(RetrievedSkill {
+            skill,
+            weight: node.weight,
+            confidence: node.confidence,
+            effective_confidence,
+            ranking_score,
+            evidence_node_ids,
+        });
+    }
+
+    results.sort_by(|a, b| {
+        b.ranking_score
+            .partial_cmp(&a.ranking_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    Ok(results)
+}
+
+#[derive(Debug, Default)]
+struct CompressionSanitization {
+    sanitized_content: String,
+    suppressed_evidence_set_ids: Vec<String>,
+    suppressed_hashes: Vec<String>,
+    stripped_line_count: usize,
+    stripped_char_count: usize,
+}
+
+fn sanitize_for_pre_compression(
+    db: &Database,
+    session_content: &str,
+    recent_evidence_set_ids: &[String],
+) -> CompressionSanitization {
+    let mut suppressed_hashes = BTreeSet::new();
+
+    for evidence_set_id in recent_evidence_set_ids {
+        let evidence_set = match db.get_evidence_set(evidence_set_id) {
+            Ok(evidence_set) => evidence_set,
+            Err(_) => continue,
+        };
+        if !evidence_set.response_hash.is_empty() {
+            suppressed_hashes.insert(evidence_set.response_hash.clone());
+        }
+    }
+
+    let mut kept_lines = Vec::new();
+    let mut suppressed_ids = BTreeSet::new();
+    let mut stripped_line_count = 0usize;
+    let mut stripped_char_count = 0usize;
+    let mut inside_graph_block = false;
+    let mut graph_block_closer = "";
+    let mut inside_recall_block = false;
+
+    for line in session_content.lines() {
+        let trimmed = line.trim();
+
+        if inside_graph_block {
+            stripped_line_count += 1;
+            stripped_char_count += line.len();
+            if trimmed == graph_block_closer {
+                inside_graph_block = false;
+                graph_block_closer = "";
+            }
+            suppressed_ids.extend(recent_evidence_set_ids.iter().cloned());
+            continue;
+        }
+
+        if trimmed == "<!-- synaptic-graph:start -->" {
+            inside_graph_block = true;
+            graph_block_closer = "<!-- synaptic-graph:end -->";
+            stripped_line_count += 1;
+            stripped_char_count += line.len();
+            suppressed_ids.extend(recent_evidence_set_ids.iter().cloned());
+            continue;
+        }
+
+        if trimmed.starts_with("```synaptic-graph") || trimmed.starts_with("```memory-graph") {
+            inside_graph_block = true;
+            graph_block_closer = "```";
+            stripped_line_count += 1;
+            stripped_char_count += line.len();
+            suppressed_ids.extend(recent_evidence_set_ids.iter().cloned());
+            continue;
+        }
+
+        if trimmed.starts_with("[Recalled memories") {
+            inside_recall_block = true;
+            stripped_line_count += 1;
+            stripped_char_count += line.len();
+            suppressed_ids.extend(recent_evidence_set_ids.iter().cloned());
+            continue;
+        }
+
+        if inside_recall_block {
+            if trimmed.is_empty() || trimmed.starts_with("- ") {
+                stripped_line_count += 1;
+                stripped_char_count += line.len();
+                suppressed_ids.extend(recent_evidence_set_ids.iter().cloned());
+                if trimmed.is_empty() {
+                    inside_recall_block = false;
+                }
+                continue;
+            }
+            inside_recall_block = false;
+        }
+
+        kept_lines.push(line.to_string());
+    }
+
+    CompressionSanitization {
+        sanitized_content: collapse_blank_lines(&kept_lines.join("\n")),
+        suppressed_evidence_set_ids: suppressed_ids.into_iter().collect(),
+        suppressed_hashes: suppressed_hashes.into_iter().collect(),
+        stripped_line_count,
+        stripped_char_count,
+    }
+}
+
+fn collapse_blank_lines(content: &str) -> String {
+    let mut lines = Vec::new();
+    let mut last_blank = false;
+
+    for line in content.lines() {
+        let is_blank = line.trim().is_empty();
+        if is_blank && last_blank {
+            continue;
+        }
+        lines.push(line);
+        last_blank = is_blank;
+    }
+
+    lines.join("\n").trim().to_string()
+}
 
 pub struct MemoryGraphServer {
     db: Mutex<Database>,
@@ -100,14 +266,24 @@ impl MemoryGraphServer {
     ) -> Result<String, String> {
         let db = self.db.lock().unwrap();
         let engine = ActivationEngine::new(&db);
-
         let request = RetrievalRequest {
             query,
             max_results: max_results.unwrap_or(10),
             max_hops: 3,
         };
 
-        let result = engine.retrieve(&request)?;
+        let mut result = if self.is_incognito() {
+            engine.retrieve_read_only(&request)?
+        } else {
+            engine.retrieve(&request)?
+        };
+        result.skills = retrieve_skill_matches(&db, &request.query, request.max_results)?;
+
+        if !self.is_incognito() {
+            let evidence_set = evidence::persist_retrieval_evidence(&db, &request, &result)?;
+            result.evidence_set = Some(evidence_set);
+        }
+
         serde_json::to_string_pretty(&result).map_err(|e| format!("Serialization error: {}", e))
     }
 
@@ -134,7 +310,7 @@ impl MemoryGraphServer {
             .map_err(|e| format!("Update failed: {}", e))?;
 
         let new_impulse = db
-            .get_impulse(&new_id)
+            .get_canonical_memory_impulse(&new_id)
             .map_err(|e| format!("Fetch failed: {}", e))?;
 
         serde_json::to_string_pretty(&new_impulse)
@@ -144,11 +320,14 @@ impl MemoryGraphServer {
     pub fn handle_inspect_memory(&self, id: String) -> Result<String, String> {
         let db = self.db.lock().unwrap();
         let impulse = db
-            .get_impulse(&id)
+            .get_canonical_memory_impulse(&id)
             .map_err(|e| format!("Not found: {}", e))?;
+        let canonical = db
+            .get_canonical_node(&id)
+            .map_err(|e| format!("Canonical node lookup failed: {}", e))?;
 
         let connections = db
-            .get_connections_for_node(&id)
+            .get_canonical_edges_for_node(&id)
             .map_err(|e| format!("Connection lookup failed: {}", e))?;
 
         let tags = db.get_tags_for_impulse(&id).unwrap_or_default();
@@ -169,19 +348,27 @@ impl MemoryGraphServer {
             "source_provider": impulse.source_provider,
             "source_account": impulse.source_account,
             "status": impulse.status,
+            "node_kind": canonical.kind.as_str(),
+            "confidence": canonical.confidence,
+            "effective_confidence": crate::confidence::effective_confidence(
+                canonical.helpful_count,
+                canonical.unhelpful_count
+            ),
+            "helpful_count": canonical.helpful_count,
+            "unhelpful_count": canonical.unhelpful_count,
             "tags": tags.iter().map(|t| serde_json::json!({"name": t.name, "color": t.color})).collect::<Vec<_>>(),
             "connections": connections.iter().map(|c| serde_json::json!({
                 "id": c.id,
                 "source_id": c.source_id,
                 "target_id": c.target_id,
                 "weight": c.weight,
+                "confidence": c.confidence,
                 "relationship": c.relationship,
                 "traversal_count": c.traversal_count,
             })).collect::<Vec<_>>(),
         });
 
-        serde_json::to_string_pretty(&response)
-            .map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization error: {}", e))
     }
 
     pub fn handle_memory_status(&self) -> Result<String, String> {
@@ -196,11 +383,16 @@ impl MemoryGraphServer {
             "confirmed_impulses": stats.confirmed_impulses,
             "candidate_impulses": stats.candidate_impulses,
             "total_connections": stats.total_connections,
+            "total_memory_nodes": stats.total_memory_nodes,
+            "total_skill_nodes": stats.total_skill_nodes,
+            "total_ghost_nodes": stats.total_ghost_nodes,
+            "total_graph_edges": stats.total_graph_edges,
+            "total_assessments": stats.total_assessments,
+            "total_evidence_sets": stats.total_evidence_sets,
             "incognito": incognito,
         });
 
-        serde_json::to_string_pretty(&response)
-            .map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization error: {}", e))
     }
 
     pub fn handle_set_incognito(&self, enabled: bool) -> Result<String, String> {
@@ -222,7 +414,7 @@ impl MemoryGraphServer {
             max_hops: 5,
         };
 
-        let result = engine.retrieve(&request)?;
+        let result = engine.retrieve_read_only(&request)?;
 
         let explanation = result
             .memories
@@ -232,6 +424,8 @@ impl MemoryGraphServer {
                 serde_json::json!({
                     "memory_id": m.impulse.id,
                     "activation_score": m.activation_score,
+                    "confidence_score": m.confidence_score,
+                    "ranking_score": m.ranking_score,
                     "activation_path": m.activation_path,
                     "content": m.impulse.content,
                 })
@@ -256,11 +450,11 @@ impl MemoryGraphServer {
         db.confirm_impulse(&id)
             .map_err(|e| format!("Confirm failed: {}", e))?;
 
-        let impulse = db.get_impulse(&id)
+        let impulse = db
+            .get_canonical_memory_impulse(&id)
             .map_err(|e| format!("Fetch failed: {}", e))?;
 
-        serde_json::to_string_pretty(&impulse)
-            .map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string_pretty(&impulse).map_err(|e| format!("Serialization error: {}", e))
     }
 
     pub fn handle_dismiss_proposal(&self, id: String) -> Result<String, String> {
@@ -327,11 +521,11 @@ impl MemoryGraphServer {
 
     pub fn handle_list_candidates(&self) -> Result<String, String> {
         let db = self.db.lock().unwrap();
-        let candidates = db.list_candidates()
+        let candidates = db
+            .list_candidates()
             .map_err(|e| format!("List failed: {}", e))?;
 
-        serde_json::to_string_pretty(&candidates)
-            .map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string_pretty(&candidates).map_err(|e| format!("Serialization error: {}", e))
     }
 
     pub fn handle_link_memories(
@@ -348,8 +542,7 @@ impl MemoryGraphServer {
         let rel = relationship.unwrap_or_else(|| "relates_to".to_string());
         let w = weight.unwrap_or(0.5);
         let conn = ingestion::manual_link(&db, &source_id, &target_id, &rel, w)?;
-        serde_json::to_string_pretty(&conn)
-            .map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string_pretty(&conn).map_err(|e| format!("Serialization error: {}", e))
     }
 
     pub fn handle_unlink_memories(&self, connection_id: String) -> Result<String, String> {
@@ -384,8 +577,7 @@ impl MemoryGraphServer {
             "nodes_scanned": count,
         });
 
-        serde_json::to_string_pretty(&response)
-            .map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization error: {}", e))
     }
 
     pub fn handle_refresh_ghost_graph(&self, name: String) -> Result<String, String> {
@@ -402,8 +594,7 @@ impl MemoryGraphServer {
             "nodes_refreshed": count,
         });
 
-        serde_json::to_string_pretty(&response)
-            .map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization error: {}", e))
     }
 
     pub fn handle_pull_through(
@@ -418,16 +609,21 @@ impl MemoryGraphServer {
         };
 
         let db = self.db.lock().unwrap();
-        let ghost_node = db.get_ghost_node_by_ref(&source_graph, &external_ref)
+        let ghost_node = db
+            .get_ghost_node_by_ref(&source_graph, &external_ref)
             .map_err(|e| format!("Ghost node not found: {}", e))?;
 
-        let sources = db.list_ghost_sources()
+        let sources = db
+            .list_ghost_sources()
             .map_err(|e| format!("Failed to list sources: {}", e))?;
 
-        let source = sources.iter().find(|s| s.name == source_graph)
+        let source = sources
+            .iter()
+            .find(|s| s.name == source_graph)
             .ok_or_else(|| format!("Source '{}' not found", source_graph))?;
 
-        let content = ghost::pull::pull_ghost_content(&db, &ghost_node, &source.root_path, pull_mode)?;
+        let content =
+            ghost::pull::pull_ghost_content(&db, &ghost_node, &source.root_path, pull_mode)?;
 
         let response = serde_json::json!({
             "ghost_node_id": ghost_node.id,
@@ -437,8 +633,7 @@ impl MemoryGraphServer {
             "content": content,
         });
 
-        serde_json::to_string_pretty(&response)
-            .map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization error: {}", e))
     }
 
     pub fn handle_create_backup(&self, backup_path: String) -> Result<String, String> {
@@ -453,8 +648,7 @@ impl MemoryGraphServer {
             "size_bytes": result.size_bytes,
         });
 
-        serde_json::to_string_pretty(&response)
-            .map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization error: {}", e))
     }
 
     pub fn handle_sync_export(
@@ -468,10 +662,11 @@ impl MemoryGraphServer {
         let response = serde_json::json!({
             "snapshot_path": result.snapshot_path,
             "checksum": result.checksum,
+            "schema_version": result.schema_version,
+            "feature_flags": result.feature_flags,
         });
 
-        serde_json::to_string_pretty(&response)
-            .map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization error: {}", e))
     }
 
     pub fn handle_create_tag(&self, name: String, color: Option<String>) -> Result<String, String> {
@@ -480,44 +675,58 @@ impl MemoryGraphServer {
             name,
             color: color.unwrap_or_else(|| "#8E99A4".to_string()),
         };
-        let tag = db.create_tag(&new_tag)
+        let tag = db
+            .create_tag(&new_tag)
             .map_err(|e| format!("Failed to create tag: {}", e))?;
-        serde_json::to_string_pretty(&tag)
-            .map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string_pretty(&tag).map_err(|e| format!("Serialization error: {}", e))
     }
 
     pub fn handle_list_tags(&self) -> Result<String, String> {
         let db = self.db.lock().unwrap();
-        let tags = db.list_tags()
+        let tags = db
+            .list_tags()
             .map_err(|e| format!("Failed to list tags: {}", e))?;
-        serde_json::to_string_pretty(&tags)
-            .map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string_pretty(&tags).map_err(|e| format!("Serialization error: {}", e))
     }
 
-    pub fn handle_tag_memory(&self, impulse_id: String, tag_name: String) -> Result<String, String> {
+    pub fn handle_tag_memory(
+        &self,
+        impulse_id: String,
+        tag_name: String,
+    ) -> Result<String, String> {
         if self.is_incognito() {
             return Err("Cannot tag memory in incognito mode".to_string());
         }
         let db = self.db.lock().unwrap();
         // Verify impulse exists
-        db.get_impulse(&impulse_id)
+        db.get_canonical_memory_impulse(&impulse_id)
             .map_err(|e| format!("Impulse not found: {}", e))?;
         // Verify tag exists
         db.get_tag(&tag_name)
             .map_err(|e| format!("Tag not found: {}", e))?;
         db.tag_impulse(&impulse_id, &tag_name)
             .map_err(|e| format!("Failed to tag impulse: {}", e))?;
-        Ok(format!("{{\"tagged\": true, \"impulse_id\": \"{}\", \"tag\": \"{}\"}}", impulse_id, tag_name))
+        Ok(format!(
+            "{{\"tagged\": true, \"impulse_id\": \"{}\", \"tag\": \"{}\"}}",
+            impulse_id, tag_name
+        ))
     }
 
-    pub fn handle_untag_memory(&self, impulse_id: String, tag_name: String) -> Result<String, String> {
+    pub fn handle_untag_memory(
+        &self,
+        impulse_id: String,
+        tag_name: String,
+    ) -> Result<String, String> {
         if self.is_incognito() {
             return Err("Cannot untag memory in incognito mode".to_string());
         }
         let db = self.db.lock().unwrap();
         db.untag_impulse(&impulse_id, &tag_name)
             .map_err(|e| format!("Failed to untag impulse: {}", e))?;
-        Ok(format!("{{\"untagged\": true, \"impulse_id\": \"{}\", \"tag\": \"{}\"}}", impulse_id, tag_name))
+        Ok(format!(
+            "{{\"untagged\": true, \"impulse_id\": \"{}\", \"tag\": \"{}\"}}",
+            impulse_id, tag_name
+        ))
     }
 
     pub fn handle_export_to_obsidian(&self, output_dir: String) -> Result<String, String> {
@@ -527,8 +736,7 @@ impl MemoryGraphServer {
             "files_written": result.files_written,
             "output_dir": result.output_dir,
         });
-        serde_json::to_string_pretty(&response)
-            .map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization error: {}", e))
     }
 
     pub fn handle_recall_narrative(&self, topic: String) -> Result<String, String> {
@@ -543,8 +751,26 @@ impl MemoryGraphServer {
         let mut narrative_parts = Vec::new();
         for mem in &result.memories {
             let tags = db.get_tags_for_impulse(&mem.impulse.id).unwrap_or_default();
-            let tag_str = tags.iter().map(|t| t.name.clone()).collect::<Vec<_>>().join(", ");
-            let conns = db.get_connections_for_node(&mem.impulse.id).unwrap_or_default();
+            let tag_str = tags
+                .iter()
+                .map(|t| t.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let conns = db
+                .get_canonical_edges_for_node(&mem.impulse.id)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|conn| {
+                    let other_id = if conn.source_id == mem.impulse.id {
+                        &conn.target_id
+                    } else {
+                        &conn.source_id
+                    };
+                    db.get_canonical_node(other_id)
+                        .map(|node| node.kind == crate::graph::GraphNodeKind::Memory)
+                        .unwrap_or(false)
+                })
+                .collect::<Vec<_>>();
 
             narrative_parts.push(serde_json::json!({
                 "content": mem.impulse.content,
@@ -574,8 +800,14 @@ impl MemoryGraphServer {
         session_duration_minutes: Option<f64>,
     ) -> Result<String, String> {
         let word_count = session_content.split_whitespace().count();
-        let decision_count = crate::extraction::count_keywords(&session_content, crate::extraction::DECISION_KEYWORDS);
-        let emotional_count = crate::extraction::count_keywords(&session_content, crate::extraction::EMOTIONAL_KEYWORDS);
+        let decision_count = crate::extraction::count_keywords(
+            &session_content,
+            crate::extraction::DECISION_KEYWORDS,
+        );
+        let emotional_count = crate::extraction::count_keywords(
+            &session_content,
+            crate::extraction::EMOTIONAL_KEYWORDS,
+        );
         let turn_estimate = (word_count / 50).max(1);
 
         let signals = crate::extraction::EngagementSignals {
@@ -620,6 +852,153 @@ impl MemoryGraphServer {
         serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization: {}", e))
     }
 
+    pub fn handle_prepare_compression(
+        &self,
+        session_content: String,
+        recent_evidence_set_ids: Option<Vec<String>>,
+        session_duration_minutes: Option<f64>,
+        reason: Option<String>,
+    ) -> Result<String, String> {
+        let recent_evidence_set_ids = recent_evidence_set_ids.unwrap_or_default();
+        let sanitization = {
+            let db = self.db.lock().unwrap();
+            sanitize_for_pre_compression(&db, &session_content, &recent_evidence_set_ids)
+        };
+        let reason = reason.unwrap_or_else(|| "pre_compress".to_string());
+
+        let proposal = self.handle_propose_memories(
+            sanitization.sanitized_content.clone(),
+            session_duration_minutes,
+        )?;
+        let proposal: serde_json::Value = serde_json::from_str(&proposal)
+            .map_err(|e| format!("Proposal serialization: {}", e))?;
+
+        let checkpoint = {
+            let mut session = self.session.lock().unwrap();
+            session.record_pre_compression(
+                &reason,
+                sanitization.suppressed_evidence_set_ids.clone(),
+                sanitization.stripped_char_count,
+            );
+            session.compression_checkpoint()
+        };
+
+        let response = serde_json::json!({
+            "reason": reason,
+            "sanitized_session_content": sanitization.sanitized_content,
+            "suppressed_evidence_set_ids": sanitization.suppressed_evidence_set_ids,
+            "suppressed_hashes": sanitization.suppressed_hashes,
+            "stripped_line_count": sanitization.stripped_line_count,
+            "stripped_char_count": sanitization.stripped_char_count,
+            "memory_proposal": proposal,
+            "compression_checkpoint": checkpoint,
+            "instruction": "Review this bounded proposal result before compressing context. If durable procedures emerged from a live evidence set, call propose_skills separately before compression."
+        });
+
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization: {}", e))
+    }
+
+    pub fn handle_compression_status(&self) -> Result<String, String> {
+        let session = self.session.lock().unwrap();
+        let response = serde_json::json!({
+            "session_id": session.id(),
+            "compression_checkpoint": session.compression_checkpoint(),
+        });
+
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization: {}", e))
+    }
+
+    pub fn handle_feedback_recall(
+        &self,
+        evidence_set_id: String,
+        feedback_kind: String,
+        node_ids: Option<Vec<String>>,
+        idempotency_key: Option<String>,
+    ) -> Result<String, String> {
+        if self.is_incognito() {
+            return Err("Cannot record recall feedback in incognito mode".to_string());
+        }
+
+        let feedback_kind = FeedbackKind::from_str(&feedback_kind)
+            .ok_or_else(|| format!("Invalid feedback kind: {}", feedback_kind))?;
+
+        let db = self.db.lock().unwrap();
+        let evidence_set = db
+            .get_evidence_set(&evidence_set_id)
+            .map_err(|e| format!("Evidence set not found: {}", e))?;
+
+        if evidence_set
+            .expires_at
+            .is_some_and(|expires_at| expires_at < chrono::Utc::now())
+        {
+            return Err(format!("Evidence set {} has expired", evidence_set_id));
+        }
+
+        let target_node_ids = match node_ids {
+            Some(ids) if !ids.is_empty() => ids,
+            _ => evidence_set.node_ids.clone(),
+        };
+
+        if target_node_ids.is_empty() {
+            return Err("No node_ids supplied and evidence set has no node targets".to_string());
+        }
+
+        let allowed_ids: std::collections::HashSet<String> =
+            evidence_set.node_ids.iter().cloned().collect();
+        let idempotency_base = idempotency_key.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+        let mut applied = Vec::new();
+        let mut skipped = Vec::new();
+
+        for node_id in target_node_ids {
+            if !allowed_ids.contains(&node_id) {
+                return Err(format!(
+                    "Node {} is not present in evidence set {}",
+                    node_id, evidence_set_id
+                ));
+            }
+
+            let event_key = format!("{}:node:{}", idempotency_base, node_id);
+            let record = db
+                .create_feedback_record(
+                    &evidence_set_id,
+                    Some(&node_id),
+                    None,
+                    feedback_kind,
+                    &event_key,
+                )
+                .map_err(|e| format!("Failed to record feedback event: {}", e))?;
+
+            if record.is_some() {
+                let node = db
+                    .apply_feedback_to_node(&node_id, feedback_kind)
+                    .map_err(|e| format!("Failed to update node confidence: {}", e))?;
+                applied.push(serde_json::json!({
+                    "node_id": node.id,
+                    "confidence": node.confidence,
+                    "effective_confidence": crate::confidence::effective_confidence(
+                        node.helpful_count,
+                        node.unhelpful_count
+                    ),
+                    "helpful_count": node.helpful_count,
+                    "unhelpful_count": node.unhelpful_count,
+                }));
+            } else {
+                skipped.push(node_id);
+            }
+        }
+
+        let response = serde_json::json!({
+            "evidence_set_id": evidence_set_id,
+            "feedback_kind": feedback_kind.as_str(),
+            "applied": applied,
+            "skipped": skipped,
+            "idempotency_key": idempotency_base,
+        });
+
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization: {}", e))
+    }
+
     pub fn handle_sync_status(
         &self,
         sync_dir: String,
@@ -634,7 +1013,285 @@ impl MemoryGraphServer {
             "latest_remote_time": result.latest_remote_time,
         });
 
-        serde_json::to_string_pretty(&response)
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_reflect_context(
+        &self,
+        evidence_set_id: String,
+        max_memories: Option<usize>,
+        max_relationships: Option<usize>,
+    ) -> Result<String, String> {
+        let db = self.db.lock().unwrap();
+        let evidence_set = db
+            .get_evidence_set(&evidence_set_id)
+            .map_err(|e| format!("Evidence set not found: {}", e))?;
+
+        if evidence_set
+            .expires_at
+            .is_some_and(|expires_at| expires_at < chrono::Utc::now())
+        {
+            return Err(format!("Evidence set {} has expired", evidence_set_id));
+        }
+
+        let packet = reflection::build_reflection_packet(
+            &db,
+            &evidence_set,
+            max_memories.unwrap_or(10),
+            max_relationships.unwrap_or(20),
+        )?;
+
+        serde_json::to_string_pretty(&packet).map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_propose_skills(
+        &self,
+        evidence_set_id: String,
+        max_candidates: Option<usize>,
+    ) -> Result<String, String> {
+        let db = self.db.lock().unwrap();
+        let evidence_set = db
+            .get_evidence_set(&evidence_set_id)
+            .map_err(|e| format!("Evidence set not found: {}", e))?;
+
+        if evidence_set
+            .expires_at
+            .is_some_and(|expires_at| expires_at < chrono::Utc::now())
+        {
+            return Err(format!("Evidence set {} has expired", evidence_set_id));
+        }
+
+        let reflection_packet = reflection::build_reflection_packet(&db, &evidence_set, 12, 24)?;
+        let max_candidates = max_candidates.unwrap_or(3);
+
+        let response = serde_json::json!({
+            "evidence_set_id": evidence_set_id,
+            "max_candidates": max_candidates,
+            "reflection_packet": reflection_packet,
+            "instruction": format!(
+                concat!(
+                    "Synthesize up to {} graph-native procedural skills from this reflection packet.\n",
+                    "Each candidate should include:\n",
+                    "- name\n",
+                    "- description\n",
+                    "- trigger\n",
+                    "- ordered steps\n",
+                    "- constraints\n",
+                    "- evidence_node_ids drawn only from reflection_packet.memory_items\n",
+                    "Only propose durable procedures, not one-off facts. Save approved skills with save_skill."
+                ),
+                max_candidates
+            ),
+        });
+
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn handle_save_skill(
+        &self,
+        name: String,
+        description: String,
+        trigger: String,
+        steps: Vec<String>,
+        constraints: Option<Vec<String>>,
+        evidence_set_id: String,
+        evidence_node_ids: Vec<String>,
+        source_provider: Option<String>,
+        source_account: Option<String>,
+    ) -> Result<String, String> {
+        if self.is_incognito() {
+            return Err("Cannot save skill in incognito mode".to_string());
+        }
+
+        if steps.is_empty() {
+            return Err("Skill must include at least one step".to_string());
+        }
+        if evidence_node_ids.is_empty() {
+            return Err("Skill must cite at least one evidence node".to_string());
+        }
+
+        let db = self.db.lock().unwrap();
+        let evidence_set = db
+            .get_evidence_set(&evidence_set_id)
+            .map_err(|e| format!("Evidence set not found: {}", e))?;
+
+        if evidence_set
+            .expires_at
+            .is_some_and(|expires_at| expires_at < chrono::Utc::now())
+        {
+            return Err(format!("Evidence set {} has expired", evidence_set_id));
+        }
+
+        let allowed_ids: std::collections::HashSet<String> =
+            evidence_set.node_ids.iter().cloned().collect();
+        for node_id in &evidence_node_ids {
+            if !allowed_ids.contains(node_id) {
+                return Err(format!(
+                    "Node {} is not present in evidence set {}",
+                    node_id, evidence_set_id
+                ));
+            }
+        }
+        let provider = source_provider.unwrap_or_else(|| "unknown".to_string());
+        let account = source_account.unwrap_or_default();
+        let constraints = constraints.unwrap_or_default();
+
+        let skill = db
+            .create_skill(
+                &name,
+                &description,
+                &trigger,
+                &steps,
+                &constraints,
+                &evidence_set_id,
+                &evidence_node_ids,
+                &provider,
+                &account,
+            )
+            .map_err(|e| format!("Failed to create skill: {}", e))?;
+
+        let evidence_edges = db
+            .get_skill_evidence_node_ids(&skill.node_id)
+            .map_err(|e| format!("Failed to load skill evidence: {}", e))?;
+
+        let response = serde_json::json!({
+            "skill": skill,
+            "evidence_node_ids": evidence_edges,
+        });
+
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_inspect_skill(&self, node_id: String) -> Result<String, String> {
+        let db = self.db.lock().unwrap();
+        let node = db
+            .get_canonical_node(&node_id)
+            .map_err(|e| format!("Skill not found: {}", e))?;
+        if node.kind != crate::graph::GraphNodeKind::Skill {
+            return Err(format!("Node {} is not a skill", node_id));
+        }
+
+        let skill = db
+            .get_skill(&node_id)
+            .map_err(|e| format!("Failed to load skill payload: {}", e))?;
+        let evidence_node_ids = db
+            .get_skill_evidence_node_ids(&node_id)
+            .map_err(|e| format!("Failed to load skill evidence: {}", e))?;
+        let relationships = db
+            .get_canonical_edges_for_node(&node_id)
+            .map_err(|e| format!("Failed to load skill relationships: {}", e))?;
+
+        let response = serde_json::json!({
+            "skill": skill,
+            "weight": node.weight,
+            "confidence": node.confidence,
+            "effective_confidence": crate::confidence::effective_confidence(
+                node.helpful_count,
+                node.unhelpful_count
+            ),
+            "helpful_count": node.helpful_count,
+            "unhelpful_count": node.unhelpful_count,
+            "evidence_node_ids": evidence_node_ids,
+            "relationships": relationships,
+        });
+
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_retrieve_skills(
+        &self,
+        query: String,
+        max_results: Option<usize>,
+    ) -> Result<String, String> {
+        let db = self.db.lock().unwrap();
+        let results = retrieve_skill_matches(&db, &query, max_results.unwrap_or(10))?;
+
+        serde_json::to_string_pretty(&results).map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_detect_contradictions(
+        &self,
+        evidence_set_id: String,
+        max_results: Option<usize>,
+    ) -> Result<String, String> {
+        let db = self.db.lock().unwrap();
+        let evidence_set = db
+            .get_evidence_set(&evidence_set_id)
+            .map_err(|e| format!("Evidence set not found: {}", e))?;
+
+        if evidence_set
+            .expires_at
+            .is_some_and(|expires_at| expires_at < chrono::Utc::now())
+        {
+            return Err(format!("Evidence set {} has expired", evidence_set_id));
+        }
+
+        let assessments =
+            assessments::detect_contradictions(&db, &evidence_set, max_results.unwrap_or(6))?;
+
+        let response = serde_json::json!({
+            "evidence_set_id": evidence_set_id,
+            "assessments": assessments,
+            "instruction": "Review candidate contradictions. Use confirm_assessment for true conflicts and dismiss_assessment for false positives.",
+        });
+
+        serde_json::to_string_pretty(&response).map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_confirm_assessment(&self, id: String) -> Result<String, String> {
+        if self.is_incognito() {
+            return Err("Cannot confirm assessments in incognito mode".to_string());
+        }
+
+        let db = self.db.lock().unwrap();
+        let assessment = db
+            .set_assessment_status(&id, AssessmentStatus::Confirmed)
+            .map_err(|e| format!("Failed to confirm assessment: {}", e))?;
+
+        serde_json::to_string_pretty(&assessment).map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_dismiss_assessment(&self, id: String) -> Result<String, String> {
+        if self.is_incognito() {
+            return Err("Cannot dismiss assessments in incognito mode".to_string());
+        }
+
+        let db = self.db.lock().unwrap();
+        let assessment = db
+            .set_assessment_status(&id, AssessmentStatus::Dismissed)
+            .map_err(|e| format!("Failed to dismiss assessment: {}", e))?;
+
+        serde_json::to_string_pretty(&assessment).map_err(|e| format!("Serialization error: {}", e))
+    }
+
+    pub fn handle_list_assessments(
+        &self,
+        assessment_type: Option<String>,
+        status: Option<String>,
+        node_id: Option<String>,
+    ) -> Result<String, String> {
+        let assessment_type = match assessment_type {
+            Some(value) => Some(
+                AssessmentType::from_str(&value)
+                    .ok_or_else(|| format!("Invalid assessment type: {}", value))?,
+            ),
+            None => None,
+        };
+        let status = match status {
+            Some(value) => Some(
+                AssessmentStatus::from_str(&value)
+                    .ok_or_else(|| format!("Invalid assessment status: {}", value))?,
+            ),
+            None => None,
+        };
+
+        let db = self.db.lock().unwrap();
+        let assessments = db
+            .list_assessments(assessment_type, status, node_id.as_deref())
+            .map_err(|e| format!("Failed to list assessments: {}", e))?;
+
+        serde_json::to_string_pretty(&assessments)
             .map_err(|e| format!("Serialization error: {}", e))
     }
 }
@@ -855,13 +1512,128 @@ pub struct ProposeMemoriesParams {
     pub session_duration_minutes: Option<f64>,
 }
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct PrepareCompressionParams {
+    /// The current session content before the client compresses or truncates it.
+    pub session_content: String,
+    /// Optional recent evidence sets whose recalled content should be suppressed from proposal input.
+    #[schemars(default)]
+    pub recent_evidence_set_ids: Option<Vec<String>>,
+    /// Optional session duration in minutes. Defaults to 30.
+    #[schemars(default)]
+    pub session_duration_minutes: Option<f64>,
+    /// Optional checkpoint reason, such as pre_compress, end_session, or explicit_review.
+    #[schemars(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct FeedbackRecallParams {
+    /// The evidence set returned by retrieve_context.
+    pub evidence_set_id: String,
+    /// helpful or unhelpful.
+    pub feedback_kind: String,
+    /// Optional subset of evidence-set node ids to apply feedback to. Defaults to all node ids in the evidence set.
+    #[schemars(default)]
+    pub node_ids: Option<Vec<String>>,
+    /// Optional idempotency key for replay-safe feedback submission.
+    #[schemars(default)]
+    pub idempotency_key: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ReflectContextParams {
+    /// The evidence set returned by retrieve_context.
+    pub evidence_set_id: String,
+    /// Maximum number of memory items to include.
+    #[schemars(default)]
+    pub max_memories: Option<usize>,
+    /// Maximum number of relationships to include.
+    #[schemars(default)]
+    pub max_relationships: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ProposeSkillsParams {
+    /// The evidence set returned by retrieve_context.
+    pub evidence_set_id: String,
+    /// Maximum number of candidates to request from the client model.
+    #[schemars(default)]
+    pub max_candidates: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SaveSkillParams {
+    /// Short skill name.
+    pub name: String,
+    /// Brief description of what the procedure accomplishes.
+    pub description: String,
+    /// Natural-language trigger describing when to use the skill.
+    pub trigger: String,
+    /// Ordered procedure steps.
+    pub steps: Vec<String>,
+    /// Optional constraints or caveats.
+    #[schemars(default)]
+    pub constraints: Option<Vec<String>>,
+    /// The evidence set grounding this skill.
+    pub evidence_set_id: String,
+    /// Evidence node ids from that evidence set supporting the procedure.
+    pub evidence_node_ids: Vec<String>,
+    /// Optional source provider tag for auditability.
+    #[schemars(default)]
+    pub source_provider: Option<String>,
+    /// Optional source account tag for auditability.
+    #[schemars(default)]
+    pub source_account: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct InspectSkillParams {
+    /// Skill node id.
+    pub node_id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct RetrieveSkillsParams {
+    /// Query string for skill retrieval.
+    pub query: String,
+    /// Maximum number of skills to return.
+    #[schemars(default)]
+    pub max_results: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct DetectContradictionsParams {
+    /// The evidence set returned by retrieve_context.
+    pub evidence_set_id: String,
+    /// Maximum number of contradiction candidates to persist.
+    #[schemars(default)]
+    pub max_results: Option<usize>,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct AssessmentStatusParams {
+    /// Assessment id.
+    pub id: String,
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct ListAssessmentsParams {
+    /// Optional assessment type, currently 'contradiction'.
+    #[schemars(default)]
+    pub assessment_type: Option<String>,
+    /// Optional status filter: candidate, confirmed, or dismissed.
+    #[schemars(default)]
+    pub status: Option<String>,
+    /// Optional node id filter.
+    #[schemars(default)]
+    pub node_id: Option<String>,
+}
+
 #[tool(tool_box)]
 impl McpHandler {
     #[tool(description = "Save a new memory to the graph")]
-    fn save_memory(
-        &self,
-        #[tool(aggr)] params: SaveMemoryParams,
-    ) -> Result<String, String> {
+    fn save_memory(&self, #[tool(aggr)] params: SaveMemoryParams) -> Result<String, String> {
         self.inner.handle_save_memory(
             params.content,
             params.impulse_type,
@@ -883,27 +1655,18 @@ impl McpHandler {
     }
 
     #[tool(description = "Soft-delete a memory by ID")]
-    fn delete_memory(
-        &self,
-        #[tool(aggr)] params: DeleteMemoryParams,
-    ) -> Result<String, String> {
+    fn delete_memory(&self, #[tool(aggr)] params: DeleteMemoryParams) -> Result<String, String> {
         self.inner.handle_delete_memory(params.id)
     }
 
     #[tool(description = "Update the content of an existing memory")]
-    fn update_memory(
-        &self,
-        #[tool(aggr)] params: UpdateMemoryParams,
-    ) -> Result<String, String> {
+    fn update_memory(&self, #[tool(aggr)] params: UpdateMemoryParams) -> Result<String, String> {
         self.inner
             .handle_update_memory(params.id, params.new_content)
     }
 
     #[tool(description = "Inspect a memory and its connections")]
-    fn inspect_memory(
-        &self,
-        #[tool(aggr)] params: InspectMemoryParams,
-    ) -> Result<String, String> {
+    fn inspect_memory(&self, #[tool(aggr)] params: InspectMemoryParams) -> Result<String, String> {
         self.inner.handle_inspect_memory(params.id)
     }
 
@@ -913,18 +1676,12 @@ impl McpHandler {
     }
 
     #[tool(description = "Enable or disable incognito mode")]
-    fn set_incognito(
-        &self,
-        #[tool(aggr)] params: SetIncognitoParams,
-    ) -> Result<String, String> {
+    fn set_incognito(&self, #[tool(aggr)] params: SetIncognitoParams) -> Result<String, String> {
         self.inner.handle_set_incognito(params.enabled)
     }
 
     #[tool(description = "Explain why a memory was recalled for a given query")]
-    fn explain_recall(
-        &self,
-        #[tool(aggr)] params: ExplainRecallParams,
-    ) -> Result<String, String> {
+    fn explain_recall(&self, #[tool(aggr)] params: ExplainRecallParams) -> Result<String, String> {
         self.inner
             .handle_explain_recall(params.query, params.memory_id)
     }
@@ -950,11 +1707,10 @@ impl McpHandler {
         self.inner.handle_list_candidates()
     }
 
-    #[tool(description = "Save and immediately confirm a memory in one step. Use this for proactive saves during conversations — skips the candidate review step. Types: heuristic, preference, decision, pattern, observation.")]
-    fn quick_save(
-        &self,
-        #[tool(aggr)] params: SaveMemoryParams,
-    ) -> Result<String, String> {
+    #[tool(
+        description = "Save and immediately confirm a memory in one step. Use this for proactive saves during conversations — skips the candidate review step. Types: heuristic, preference, decision, pattern, observation."
+    )]
+    fn quick_save(&self, #[tool(aggr)] params: SaveMemoryParams) -> Result<String, String> {
         self.inner.handle_quick_save(
             params.content,
             params.impulse_type,
@@ -966,11 +1722,10 @@ impl McpHandler {
         )
     }
 
-    #[tool(description = "Create a connection between two memories. Use for manually linking related impulses.")]
-    fn link_memories(
-        &self,
-        #[tool(aggr)] params: LinkMemoriesParams,
-    ) -> Result<String, String> {
+    #[tool(
+        description = "Create a connection between two memories. Use for manually linking related impulses."
+    )]
+    fn link_memories(&self, #[tool(aggr)] params: LinkMemoriesParams) -> Result<String, String> {
         self.inner.handle_link_memories(
             params.source_id,
             params.target_id,
@@ -987,7 +1742,9 @@ impl McpHandler {
         self.inner.handle_unlink_memories(params.connection_id)
     }
 
-    #[tool(description = "Register an external knowledge base as a ghost graph. Scans the directory for markdown files and maps their structure without ingesting content.")]
+    #[tool(
+        description = "Register an external knowledge base as a ghost graph. Scans the directory for markdown files and maps their structure without ingesting content."
+    )]
     fn register_ghost_graph(
         &self,
         #[tool(aggr)] params: RegisterGhostGraphParams,
@@ -1000,7 +1757,9 @@ impl McpHandler {
         )
     }
 
-    #[tool(description = "Refresh a ghost graph by re-scanning the external knowledge base for changes")]
+    #[tool(
+        description = "Refresh a ghost graph by re-scanning the external knowledge base for changes"
+    )]
     fn refresh_ghost_graph(
         &self,
         #[tool(aggr)] params: RefreshGhostGraphParams,
@@ -1008,45 +1767,34 @@ impl McpHandler {
         self.inner.handle_refresh_ghost_graph(params.name)
     }
 
-    #[tool(description = "Pull content from a ghost node. 'session_only' releases after session. 'permanent' creates a memory node.")]
-    fn pull_through(
-        &self,
-        #[tool(aggr)] params: PullThroughParams,
-    ) -> Result<String, String> {
-        self.inner.handle_pull_through(
-            params.source_graph,
-            params.external_ref,
-            params.mode,
-        )
+    #[tool(
+        description = "Pull content from a ghost node. 'session_only' releases after session. 'permanent' creates a memory node."
+    )]
+    fn pull_through(&self, #[tool(aggr)] params: PullThroughParams) -> Result<String, String> {
+        self.inner
+            .handle_pull_through(params.source_graph, params.external_ref, params.mode)
     }
 
     #[tool(description = "Create a backup of the memory graph database")]
-    fn create_backup(
-        &self,
-        #[tool(aggr)] params: CreateBackupParams,
-    ) -> Result<String, String> {
+    fn create_backup(&self, #[tool(aggr)] params: CreateBackupParams) -> Result<String, String> {
         self.inner.handle_create_backup(params.backup_path)
     }
 
     #[tool(description = "Export a sync snapshot of the database for cross-device synchronization")]
-    fn sync_export(
-        &self,
-        #[tool(aggr)] params: SyncExportParams,
-    ) -> Result<String, String> {
+    fn sync_export(&self, #[tool(aggr)] params: SyncExportParams) -> Result<String, String> {
         self.inner
             .handle_sync_export(params.sync_dir, params.device_id)
     }
 
     #[tool(description = "Check sync directory for remote device updates")]
-    fn sync_status(
-        &self,
-        #[tool(aggr)] params: SyncStatusParams,
-    ) -> Result<String, String> {
+    fn sync_status(&self, #[tool(aggr)] params: SyncStatusParams) -> Result<String, String> {
         self.inner
             .handle_sync_status(params.sync_dir, params.device_id)
     }
 
-    #[tool(description = "Export the memory graph as linked markdown files suitable for an Obsidian vault. Creates one .md file per confirmed memory with YAML frontmatter, wikilinks for connections, and tag index files.")]
+    #[tool(
+        description = "Export the memory graph as linked markdown files suitable for an Obsidian vault. Creates one .md file per confirmed memory with YAML frontmatter, wikilinks for connections, and tag index files."
+    )]
     fn export_to_obsidian(
         &self,
         #[tool(aggr)] params: ExportToObsidianParams,
@@ -1055,10 +1803,7 @@ impl McpHandler {
     }
 
     #[tool(description = "Create a tag with a name and hex color for organizing memories")]
-    fn create_tag(
-        &self,
-        #[tool(aggr)] params: CreateTagParams,
-    ) -> Result<String, String> {
+    fn create_tag(&self, #[tool(aggr)] params: CreateTagParams) -> Result<String, String> {
         self.inner.handle_create_tag(params.name, params.color)
     }
 
@@ -1068,22 +1813,20 @@ impl McpHandler {
     }
 
     #[tool(description = "Add a tag to a memory")]
-    fn tag_memory(
-        &self,
-        #[tool(aggr)] params: TagMemoryParams,
-    ) -> Result<String, String> {
-        self.inner.handle_tag_memory(params.impulse_id, params.tag_name)
+    fn tag_memory(&self, #[tool(aggr)] params: TagMemoryParams) -> Result<String, String> {
+        self.inner
+            .handle_tag_memory(params.impulse_id, params.tag_name)
     }
 
     #[tool(description = "Remove a tag from a memory")]
-    fn untag_memory(
-        &self,
-        #[tool(aggr)] params: UntagMemoryParams,
-    ) -> Result<String, String> {
-        self.inner.handle_untag_memory(params.impulse_id, params.tag_name)
+    fn untag_memory(&self, #[tool(aggr)] params: UntagMemoryParams) -> Result<String, String> {
+        self.inner
+            .handle_untag_memory(params.impulse_id, params.tag_name)
     }
 
-    #[tool(description = "Recall a narrative about a topic — retrieves connected impulses with context for the LLM to reconstruct a coherent story")]
+    #[tool(
+        description = "Recall a narrative about a topic — retrieves connected impulses with context for the LLM to reconstruct a coherent story"
+    )]
     fn recall_narrative(
         &self,
         #[tool(aggr)] params: RecallNarrativeParams,
@@ -1091,12 +1834,141 @@ impl McpHandler {
         self.inner.handle_recall_narrative(params.topic)
     }
 
-    #[tool(description = "Analyze a session and propose memories to extract. Returns engagement assessment and extraction instructions for the LLM.")]
+    #[tool(
+        description = "Analyze a session and propose memories to extract. Returns engagement assessment and extraction instructions for the LLM."
+    )]
     fn propose_memories(
         &self,
         #[tool(aggr)] params: ProposeMemoriesParams,
     ) -> Result<String, String> {
-        self.inner.handle_propose_memories(params.session_content, params.session_duration_minutes)
+        self.inner
+            .handle_propose_memories(params.session_content, params.session_duration_minutes)
+    }
+
+    #[tool(
+        description = "Sanitize recalled graph content out of session text, run propose_memories on the cleaned text, and record a pre-compression checkpoint"
+    )]
+    fn prepare_compression(
+        &self,
+        #[tool(aggr)] params: PrepareCompressionParams,
+    ) -> Result<String, String> {
+        self.inner.handle_prepare_compression(
+            params.session_content,
+            params.recent_evidence_set_ids,
+            params.session_duration_minutes,
+            params.reason,
+        )
+    }
+
+    #[tool(
+        description = "Report whether the current session has used the pre-compression checkpoint hook"
+    )]
+    fn compression_status(&self) -> Result<String, String> {
+        self.inner.handle_compression_status()
+    }
+
+    #[tool(
+        description = "Record helpful or unhelpful feedback for memories returned in a retrieve_context evidence set"
+    )]
+    fn feedback_recall(
+        &self,
+        #[tool(aggr)] params: FeedbackRecallParams,
+    ) -> Result<String, String> {
+        self.inner.handle_feedback_recall(
+            params.evidence_set_id,
+            params.feedback_kind,
+            params.node_ids,
+            params.idempotency_key,
+        )
+    }
+
+    #[tool(
+        description = "Build a bounded, typed reflection packet over a retrieve_context evidence set"
+    )]
+    fn reflect_context(
+        &self,
+        #[tool(aggr)] params: ReflectContextParams,
+    ) -> Result<String, String> {
+        self.inner.handle_reflect_context(
+            params.evidence_set_id,
+            params.max_memories,
+            params.max_relationships,
+        )
+    }
+
+    #[tool(
+        description = "Assemble a grounded proposal packet for procedural skills from an evidence set"
+    )]
+    fn propose_skills(&self, #[tool(aggr)] params: ProposeSkillsParams) -> Result<String, String> {
+        self.inner
+            .handle_propose_skills(params.evidence_set_id, params.max_candidates)
+    }
+
+    #[tool(
+        description = "Save a graph-native procedural skill grounded in a retrieve_context evidence set"
+    )]
+    fn save_skill(&self, #[tool(aggr)] params: SaveSkillParams) -> Result<String, String> {
+        self.inner.handle_save_skill(
+            params.name,
+            params.description,
+            params.trigger,
+            params.steps,
+            params.constraints,
+            params.evidence_set_id,
+            params.evidence_node_ids,
+            params.source_provider,
+            params.source_account,
+        )
+    }
+
+    #[tool(description = "Inspect a saved graph-native procedural skill")]
+    fn inspect_skill(&self, #[tool(aggr)] params: InspectSkillParams) -> Result<String, String> {
+        self.inner.handle_inspect_skill(params.node_id)
+    }
+
+    #[tool(description = "Retrieve saved procedural skills relevant to a query")]
+    fn retrieve_skills(
+        &self,
+        #[tool(aggr)] params: RetrieveSkillsParams,
+    ) -> Result<String, String> {
+        self.inner
+            .handle_retrieve_skills(params.query, params.max_results)
+    }
+
+    #[tool(
+        description = "Detect and persist contradiction assessments from a retrieve_context evidence set"
+    )]
+    fn detect_contradictions(
+        &self,
+        #[tool(aggr)] params: DetectContradictionsParams,
+    ) -> Result<String, String> {
+        self.inner
+            .handle_detect_contradictions(params.evidence_set_id, params.max_results)
+    }
+
+    #[tool(description = "Confirm an assessment, such as a contradiction candidate")]
+    fn confirm_assessment(
+        &self,
+        #[tool(aggr)] params: AssessmentStatusParams,
+    ) -> Result<String, String> {
+        self.inner.handle_confirm_assessment(params.id)
+    }
+
+    #[tool(description = "Dismiss an assessment so it stops resurfacing until evidence changes")]
+    fn dismiss_assessment(
+        &self,
+        #[tool(aggr)] params: AssessmentStatusParams,
+    ) -> Result<String, String> {
+        self.inner.handle_dismiss_assessment(params.id)
+    }
+
+    #[tool(description = "List saved assessments with optional type, status, or node filters")]
+    fn list_assessments(
+        &self,
+        #[tool(aggr)] params: ListAssessmentsParams,
+    ) -> Result<String, String> {
+        self.inner
+            .handle_list_assessments(params.assessment_type, params.status, params.node_id)
     }
 }
 
@@ -1159,7 +2031,7 @@ impl ServerHandler for McpHandler {
                     "- Short replies, topic-switching = low engagement or discomfort\n",
                     "- Late-night sessions, weekend work = passionate about the topic\n\n",
 
-                    "Use quick_save for saves. Set engagement_level honestly. At end of long sessions, call propose_memories.\n",
+                    "Use quick_save for saves. Set engagement_level honestly. At end of long sessions, call propose_memories. Before compression or truncation boundaries, call prepare_compression.\n",
                 )
                     .into(),
             ),

@@ -1,12 +1,17 @@
 pub mod activation;
+pub mod assessments;
 pub mod backup;
+pub mod confidence;
 pub mod db;
+pub mod evidence;
 pub mod extraction;
 pub mod ghost;
+pub mod graph;
 pub mod ingestion;
 pub mod markdown;
 pub mod models;
 pub mod redaction;
+pub mod reflection;
 pub mod server;
 pub mod session;
 pub mod sync;

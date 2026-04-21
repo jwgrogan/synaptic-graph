@@ -1,9 +1,9 @@
-use synaptic_graph::server::{McpHandler, MemoryGraphServer};
-use synaptic_graph::db::Database;
-use synaptic_graph::activation::ActivationEngine;
-use synaptic_graph::models::*;
 use rmcp::ServiceExt;
 use std::path::PathBuf;
+use synaptic_graph::activation::ActivationEngine;
+use synaptic_graph::db::Database;
+use synaptic_graph::models::*;
+use synaptic_graph::server::{McpHandler, MemoryGraphServer};
 
 fn resolve_db_path() -> Result<PathBuf, String> {
     if let Ok(p) = std::env::var("MEMORY_GRAPH_DB") {
@@ -55,9 +55,20 @@ fn cli_retrieve(query: &str, max_results: usize) -> Result<(), String> {
         let tag_str = if tags.is_empty() {
             String::new()
         } else {
-            format!(" [{}]", tags.iter().map(|t| t.name.clone()).collect::<Vec<_>>().join(", "))
+            format!(
+                " [{}]",
+                tags.iter()
+                    .map(|t| t.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
         };
-        println!("- ({}) {}{}", mem.impulse.impulse_type.as_str(), mem.impulse.content, tag_str);
+        println!(
+            "- ({}) {}{}",
+            mem.impulse.impulse_type.as_str(),
+            mem.impulse.content,
+            tag_str
+        );
     }
 
     Ok(())
@@ -95,8 +106,13 @@ fn cli_status() -> Result<(), String> {
         .map_err(|e| format!("DB error: {}", e))?;
 
     let stats = db.memory_stats().map_err(|e| format!("DB error: {}", e))?;
-    println!("{} memories ({} confirmed, {} candidates), {} connections",
-        stats.total_impulses, stats.confirmed_impulses, stats.candidate_impulses, stats.total_connections);
+    println!(
+        "{} memories ({} confirmed, {} candidates), {} connections",
+        stats.total_impulses,
+        stats.confirmed_impulses,
+        stats.candidate_impulses,
+        stats.total_connections
+    );
     Ok(())
 }
 
@@ -115,80 +131,16 @@ fn cli_merge(other_db_path: &str) -> Result<(), String> {
 
     eprintln!("Merging {} into {}", other_db_path, local_path_str);
 
-    // Open both databases
-    let other_db = Database::open(other_db_path)
-        .map_err(|e| format!("Failed to open source DB: {}", e))?;
-    let local_db = Database::open(local_path_str)
-        .map_err(|e| format!("Failed to open local DB: {}", e))?;
+    Database::require_compatible_external_schema(other_db_path)?;
 
-    let other_impulses = other_db.list_impulses(None)
-        .map_err(|e| format!("Failed to read source: {}", e))?;
+    let checksum = synaptic_graph::backup::checksum_file(other_db_path)
+        .map_err(|e| format!("Failed to checksum source DB: {}", e))?;
+    let result = synaptic_graph::sync::import_snapshot(other_db_path, local_path_str, &checksum)?;
 
-    let mut inserted = 0;
-    let mut skipped = 0;
-
-    for imp in &other_impulses {
-        match local_db.get_impulse(&imp.id) {
-            Ok(_) => {
-                skipped += 1; // Already exists locally
-            }
-            Err(_) => {
-                // New record — insert with original ID
-                let input = NewImpulse {
-                    content: imp.content.clone(),
-                    impulse_type: imp.impulse_type,
-                    initial_weight: imp.initial_weight,
-                    emotional_valence: imp.emotional_valence,
-                    engagement_level: imp.engagement_level,
-                    source_signals: imp.source_signals.clone(),
-                    source_type: imp.source_type,
-                    source_ref: imp.source_ref.clone(),
-                    source_provider: imp.source_provider.clone(),
-                    source_account: imp.source_account.clone(),
-                };
-                match local_db.insert_impulse_with_id(&imp.id, &input) {
-                    Ok(_) => {
-                        if imp.status == ImpulseStatus::Confirmed {
-                            let _ = local_db.confirm_impulse(&imp.id);
-                        }
-                        inserted += 1;
-                    }
-                    Err(e) => {
-                        eprintln!("  Skip {}: {}", &imp.id[..8], e);
-                        skipped += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    println!("Merged: {} new, {} already existed", inserted, skipped);
-
-    // Also merge connections
-    let mut conn_inserted = 0;
-    for imp in &other_impulses {
-        let conns = other_db.get_connections_for_node(&imp.id).unwrap_or_default();
-        for conn in &conns {
-            match local_db.get_connection(&conn.id) {
-                Ok(_) => {} // Already exists
-                Err(_) => {
-                    let input = NewConnection {
-                        source_id: conn.source_id.clone(),
-                        target_id: conn.target_id.clone(),
-                        weight: conn.weight,
-                        relationship: conn.relationship.clone(),
-                    };
-                    if local_db.insert_connection(&input).is_ok() {
-                        conn_inserted += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    if conn_inserted > 0 {
-        println!("Connections merged: {}", conn_inserted);
-    }
+    println!(
+        "Merged: {} inserted, {} updated, {} skipped",
+        result.inserted, result.updated, result.skipped
+    );
 
     Ok(())
 }

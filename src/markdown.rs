@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::db::Database;
+use crate::graph::GraphNodeKind;
 use crate::models::*;
 
 pub struct ExportResult {
@@ -16,7 +17,7 @@ pub fn export_to_markdown(db: &Database, output_dir: &str) -> Result<ExportResul
     fs::create_dir_all(dir).map_err(|e| format!("Failed to create dir: {}", e))?;
 
     let impulses = db
-        .list_impulses(Some(ImpulseStatus::Confirmed))
+        .list_canonical_memory_impulses(Some(ImpulseStatus::Confirmed))
         .map_err(|e| format!("DB error: {}", e))?;
 
     let mut count = 0;
@@ -24,8 +25,24 @@ pub fn export_to_markdown(db: &Database, output_dir: &str) -> Result<ExportResul
     for impulse in &impulses {
         let tags = db.get_tags_for_impulse(&impulse.id).unwrap_or_default();
         let connections = db
-            .get_connections_for_node(&impulse.id)
-            .unwrap_or_default();
+            .get_canonical_edges_for_node(&impulse.id)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|conn| {
+                let other_id = if conn.source_id == impulse.id {
+                    &conn.target_id
+                } else {
+                    &conn.source_id
+                };
+
+                db.get_canonical_node(other_id)
+                    .map(|node| {
+                        node.kind == GraphNodeKind::Memory
+                            && node.status == ImpulseStatus::Confirmed.as_str()
+                    })
+                    .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
 
         // Sanitize title from first 50 chars of content
         let title = sanitize_filename(&impulse.content, 50);
@@ -62,7 +79,7 @@ pub fn export_to_markdown(db: &Database, output_dir: &str) -> Result<ExportResul
                     &conn.source_id
                 };
                 let other_content = db
-                    .get_impulse(other_id)
+                    .get_canonical_memory_impulse(other_id)
                     .map(|i| sanitize_filename(&i.content, 50))
                     .unwrap_or_else(|_| "unknown".to_string());
                 let other_short = &other_id[..8.min(other_id.len())];

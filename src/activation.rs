@@ -2,9 +2,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::confidence::{effective_confidence, ranking_multiplier};
 use crate::db::Database;
 use crate::models::*;
 use crate::weight;
+
+const CONFIRMED_CONTRADICTION_RANKING_PENALTY: f64 = 0.85;
 
 pub struct ActivationEngine<'a> {
     db: &'a Database,
@@ -16,19 +19,36 @@ impl<'a> ActivationEngine<'a> {
     }
 
     pub fn retrieve(&self, request: &RetrievalRequest) -> Result<RetrievalResult, String> {
+        self.retrieve_internal(request, true)
+    }
+
+    pub fn retrieve_read_only(
+        &self,
+        request: &RetrievalRequest,
+    ) -> Result<RetrievalResult, String> {
+        self.retrieve_internal(request, false)
+    }
+
+    fn retrieve_internal(
+        &self,
+        request: &RetrievalRequest,
+        allow_side_effects: bool,
+    ) -> Result<RetrievalResult, String> {
         // Early return for empty queries — FTS5 rejects empty strings
         if request.query.trim().is_empty() {
             return Ok(RetrievalResult {
                 memories: vec![],
+                skills: vec![],
                 ghost_activations: vec![],
                 total_nodes_activated: 0,
+                evidence_set: None,
             });
         }
 
         // Phase 1: Seed — find directly matching nodes via FTS
         let seed_matches = self
             .db
-            .search_impulses_fts(&request.query)
+            .search_canonical_memory_fts(&request.query)
             .map_err(|e| format!("FTS search failed: {}", e))?;
 
         // Also search ghost nodes via FTS
@@ -47,8 +67,10 @@ impl<'a> ActivationEngine<'a> {
         if seed_matches.is_empty() && ghost_matches.is_empty() {
             return Ok(RetrievalResult {
                 memories: vec![],
+                skills: vec![],
                 total_nodes_activated: 0,
                 ghost_activations: vec![],
+                evidence_set: None,
             });
         }
 
@@ -78,7 +100,7 @@ impl<'a> ActivationEngine<'a> {
             for (node_id, node_activation) in &current_nodes {
                 let connections = self
                     .db
-                    .get_connections_for_node(node_id)
+                    .get_canonical_edges_for_node(node_id)
                     .map_err(|e| format!("Failed to get connections: {}", e))?;
 
                 for conn in &connections {
@@ -89,7 +111,7 @@ impl<'a> ActivationEngine<'a> {
                     };
 
                     // Skip if neighbor is deleted or superseded
-                    let neighbor = match self.db.get_impulse(neighbor_id) {
+                    let neighbor = match self.db.get_canonical_memory_impulse(neighbor_id) {
                         Ok(imp) => imp,
                         Err(_) => continue,
                     };
@@ -113,24 +135,17 @@ impl<'a> ActivationEngine<'a> {
                         EngagementLevel::Low => 0.3,
                     };
 
-                    let propagated =
-                        node_activation * effective_conn_weight * engagement_factor;
+                    let propagated = node_activation * effective_conn_weight * engagement_factor;
 
                     let current = activations.get(neighbor_id).copied().unwrap_or(0.0);
-                    let new_score = new_activations
-                        .get(neighbor_id)
-                        .copied()
-                        .unwrap_or(current);
+                    let new_score = new_activations.get(neighbor_id).copied().unwrap_or(current);
 
                     if propagated > new_score - current {
                         new_activations.insert(neighbor_id.clone(), current + propagated);
                         traversed_connections.insert(conn.id.clone());
 
                         // Update activation path
-                        let mut path = activation_paths
-                            .get(node_id)
-                            .cloned()
-                            .unwrap_or_default();
+                        let mut path = activation_paths.get(node_id).cloned().unwrap_or_default();
                         path.push(neighbor_id.clone());
                         activation_paths.insert(neighbor_id.clone(), path);
 
@@ -149,18 +164,25 @@ impl<'a> ActivationEngine<'a> {
             }
         }
 
-        // Phase 3: Reinforce traversed connections
-        for conn_id in &traversed_connections {
-            if let Ok(conn) = self.db.get_connection(conn_id) {
-                let new_weight = weight::reinforce(conn.weight);
-                let _ = self.db.update_connection_weight(conn_id, new_weight);
-                let _ = self.db.touch_connection(conn_id);
+        // Phase 3: Reinforce traversed connections and touch accessed nodes when mutation is allowed
+        if allow_side_effects {
+            for conn_id in &traversed_connections {
+                if let Ok(conn) = self.db.get_connection(conn_id) {
+                    let new_weight = weight::reinforce(conn.weight);
+                    let _ = self.db.update_connection_weight(conn_id, new_weight);
+                    let _ = self.db.touch_connection(conn_id);
+                } else if let Ok(conn) = self.db.get_canonical_edge(conn_id) {
+                    let new_weight = weight::reinforce(conn.weight);
+                    let _ = self.db.update_canonical_edge_weight(conn_id, new_weight);
+                    let _ = self.db.touch_canonical_edge(conn_id);
+                }
             }
-        }
 
-        // Touch accessed impulses
-        for node_id in activations.keys() {
-            let _ = self.db.touch_impulse(node_id);
+            for node_id in activations.keys() {
+                if self.db.touch_impulse(node_id).is_err() {
+                    let _ = self.db.touch_canonical_node(node_id);
+                }
+            }
         }
 
         // Phase 4: Assemble results
@@ -171,7 +193,7 @@ impl<'a> ActivationEngine<'a> {
                 continue;
             }
 
-            let impulse = match self.db.get_impulse(id) {
+            let impulse = match self.db.get_canonical_memory_impulse(id) {
                 Ok(imp) => imp,
                 Err(_) => continue,
             };
@@ -183,18 +205,38 @@ impl<'a> ActivationEngine<'a> {
             }
 
             let path = activation_paths.get(id).cloned().unwrap_or_default();
+            let confidence_score = self
+                .db
+                .get_canonical_node(id)
+                .map(|node| effective_confidence(node.helpful_count, node.unhelpful_count))
+                .unwrap_or(0.5);
+            let confirmed_contradictions = self
+                .db
+                .count_confirmed_contradictions_for_node(id)
+                .map_err(|e| format!("Failed to read contradiction count: {}", e))?;
+            let contradiction_penalty =
+                CONFIRMED_CONTRADICTION_RANKING_PENALTY.powi(confirmed_contradictions as i32);
+            let ranking_score =
+                *score * ranking_multiplier(confidence_score) * contradiction_penalty;
 
             results.push(RetrievedMemory {
                 impulse,
                 activation_score: *score,
+                confidence_score,
+                ranking_score,
                 activation_path: path,
             });
         }
 
         results.sort_by(|a, b| {
-            b.activation_score
-                .partial_cmp(&a.activation_score)
+            b.ranking_score
+                .partial_cmp(&a.ranking_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    b.activation_score
+                        .partial_cmp(&a.activation_score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
         });
         results.truncate(request.max_results);
 
@@ -223,8 +265,10 @@ impl<'a> ActivationEngine<'a> {
 
         Ok(RetrievalResult {
             memories: results,
+            skills: vec![],
             total_nodes_activated: total_activated,
             ghost_activations,
+            evidence_set: None,
         })
     }
 }

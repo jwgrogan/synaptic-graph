@@ -1,5 +1,6 @@
 mod common;
 
+use std::fs;
 use synaptic_graph::activation::ActivationEngine;
 use synaptic_graph::backup;
 use synaptic_graph::db::Database;
@@ -8,7 +9,6 @@ use synaptic_graph::ghost::scanner::ScanConfig;
 use synaptic_graph::ingestion;
 use synaptic_graph::models::*;
 use synaptic_graph::sync;
-use std::fs;
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
@@ -44,7 +44,8 @@ fn create_obsidian_vault() -> TempDir {
     fs::write(
         root.join("reading-list.md"),
         "# Reading List\n\nPapers on associative memory and graph databases.\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     dir
 }
@@ -57,12 +58,14 @@ fn create_code_docs_vault() -> TempDir {
     fs::write(
         root.join("api-reference.md"),
         "# API Reference\n\nREST endpoints for the memory graph service.\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     fs::write(
         root.join("architecture-decisions.md"),
         "# Architecture Decisions\n\nSQLite chosen for portable local-first storage.\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     dir
 }
@@ -76,11 +79,7 @@ fn md_scan_config() -> ScanConfig {
 }
 
 /// Insert a confirmed impulse with a connection to an existing impulse.
-fn insert_connected_impulse(
-    db: &Database,
-    content: &str,
-    target_id: &str,
-) -> Impulse {
+fn insert_connected_impulse(db: &Database, content: &str, target_id: &str) -> Impulse {
     ingestion::save_and_confirm_with_connections(
         db,
         content,
@@ -138,12 +137,8 @@ fn validation_p3_cross_device_consistency() {
     assert_eq!(count_a, 3);
 
     // Export Device A snapshot to sync directory
-    let export_result = sync::export_snapshot(
-        &db_a,
-        sync_dir.to_str().unwrap(),
-        "device-a",
-    )
-    .unwrap();
+    let export_result =
+        sync::export_snapshot(&db_a, sync_dir.to_str().unwrap(), "device-a").unwrap();
 
     // --- Device B: fresh database, import from sync ---
     let db_b = file_db(&tmp, "device-b.db");
@@ -157,19 +152,24 @@ fn validation_p3_cross_device_consistency() {
     )
     .unwrap();
 
-    assert_eq!(merge_result.inserted, 3, "All 3 impulses should be inserted into Device B");
+    assert_eq!(
+        merge_result.inserted, 3,
+        "All 3 impulses should be inserted into Device B"
+    );
     assert_eq!(merge_result.skipped, 0);
 
     // Re-open Device B and verify content
     let db_b = Database::open(&db_path(&tmp, "device-b.db")).unwrap();
     let count_b_after = db_b.impulse_count().unwrap();
-    assert_eq!(count_b_after, 3, "Device B should have same impulse count as Device A");
+    assert_eq!(
+        count_b_after, 3,
+        "Device B should have same impulse count as Device A"
+    );
 
     // Verify specific content survived the transfer
     let imp_b = db_b.get_impulse(&imp1.id).unwrap();
     assert_eq!(
-        imp_b.content,
-        "Spreading activation is inspired by neural associative memory",
+        imp_b.content, "Spreading activation is inspired by neural associative memory",
         "Content should be identical after sync"
     );
 }
@@ -227,7 +227,10 @@ fn validation_p3_backup_restore_full_integrity() {
     let ghost_nodes_before = db.list_ghost_nodes_by_source("obsidian-vault").unwrap();
 
     assert_eq!(impulse_count_before, 3);
-    assert!(connection_count_before >= 2, "Should have at least 2 connections");
+    assert!(
+        connection_count_before >= 2,
+        "Should have at least 2 connections"
+    );
     assert_eq!(ghost_sources_before.len(), 1);
     assert_eq!(ghost_nodes_before.len(), 3, "Vault has 3 markdown files");
 
@@ -252,7 +255,9 @@ fn validation_p3_backup_restore_full_integrity() {
     let impulse_count_after = restored_db.impulse_count().unwrap();
     let connection_count_after = restored_db.connection_count().unwrap();
     let ghost_sources_after = restored_db.list_ghost_sources().unwrap();
-    let ghost_nodes_after = restored_db.list_ghost_nodes_by_source("obsidian-vault").unwrap();
+    let ghost_nodes_after = restored_db
+        .list_ghost_nodes_by_source("obsidian-vault")
+        .unwrap();
 
     assert_eq!(
         impulse_count_after, impulse_count_before,
@@ -418,12 +423,8 @@ fn validation_p3_sync_preserves_local_first() {
     );
 
     // Export a snapshot (simulating a sync action)
-    let _export_result = sync::export_snapshot(
-        &db,
-        sync_dir.to_str().unwrap(),
-        "local-device",
-    )
-    .unwrap();
+    let _export_result =
+        sync::export_snapshot(&db, sync_dir.to_str().unwrap(), "local-device").unwrap();
 
     // After exporting, create MORE local data (local operations must not depend on sync)
     let imp3 = ingestion::save_and_confirm(
